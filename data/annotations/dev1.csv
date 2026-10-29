@@ -1,0 +1,4 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+dev1,p1,1,sync,0,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",1793225348.9374,1793225360.3515,576,0,ok
+dev1,p1,2,curl,9,9,fast,Fast: as fast as you can while staying in control. Count out loud: 9 lifts. All full and strict.,1793225380.3112,1793225421.0812,2059,0,ok
+dev1,p1,3,adjust,0,0,distractor,"Shake out your arm and fiddle with the strap for about 15 s, without moving the band. Not a set.",1793225465.5710,1793225495.8095,1528,0,ok

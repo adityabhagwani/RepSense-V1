@@ -1,0 +1,4 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+synctest4,p1,1,sync,0,0,gesture,"Elbow locked, arm straight: 3 fast swings from the shoulder.",1793072159.5275,1793072167.2119,387,0,ok
+synctest4,p1,2,curl,8,8,normal,"Phone on the upper arm, Nano on the wrist. Steady pace.",1793072176.3149,1793072203.1748,1355,0,ok
+synctest4,p1,3,sync,0,0,gesture,Same 3 straight-arm swings.,1793072208.4255,1793072213.3507,249,0,ok

@@ -1,0 +1,3 @@
+session,set_idx,movement,kind,note,by,marked_at
+dev1b,2,7,drift,drifted on lift 7 instead of scripted 5,aditya,2026-10-28T15:41:16-07:00
+dev1b,2,5,ok,scripted drift on 5 not done,aditya,2026-10-28T15:41:16-07:00

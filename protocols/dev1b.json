@@ -1,0 +1,9 @@
+{
+  "session": "dev1b",
+  "seed": 111,
+  "exercises": [
+    "curl"
+  ],
+  "numpy": "2.5.4",
+  "created": "2026-10-28"
+}

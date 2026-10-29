@@ -1,0 +1,2 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+usbcheck,p1,1,still,0,0,usb_up,"Hold the Nano in your hand, USB pointing straight up (a door frame helps), dead still for about 10 s.",1793305123.7257,1793305161.9832,1930,0,ok

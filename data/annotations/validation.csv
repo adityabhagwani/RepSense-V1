@@ -1,0 +1,4 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+validation,p1,1,still,0,0,still,"Board flat on the table, don't touch it. Stop after ~60 s.",1793049321.9038,1793049354.1178,1625,0,ok
+validation,p1,2,shake,0,0,shake,Shake the board hard in every direction for ~30 s.,1793049388.4855,1793049390.1679,85,0,ok
+validation,p1,3,curl,5,5,fast,Strap it on your wrist. 5 fast curls with your heaviest dumbbell (checks the ±4 g range).,1793049404.1573,1793049404.9060,37,0,ok

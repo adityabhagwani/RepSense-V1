@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+*.mov
+*.mp4
+
+# Derived: regenerate with src.sync / src.labels / src.check_marks / src.counter
+data/aligned/
+data/labels/
+data/check_marks/
+reports/
