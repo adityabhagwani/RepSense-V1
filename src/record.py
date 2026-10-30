@@ -158,6 +158,7 @@ def run_session(streamer, script, session, participant, ann_file, start=0,
             say(f"\n[{i + 1}/{len(script)}] {item['exercise']} · {item['reps']} reps · {item.get('condition', '')}")
             if item.get("notes"):
                 say(f"       {item['notes']}")
+            say("       Press Enter with your OTHER hand; let the sensor arm hang still for a second, then start.")
             choice = ask("Press Enter to START recording, then do the set · s = skip · q = quit > ").strip().lower()
             if choice == "q":
                 break

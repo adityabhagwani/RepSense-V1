@@ -23,7 +23,7 @@ REP_S, TOP_DEG, HALF_DEG = 2.5, 130.0, 65.0
 HALF_REP, DRIFT_REPS, LEAN_REP = 6, (3, 4, 5), 7
 GAP_S = 2.0  # pause after rep 4 that a sideways swing can use
 USB_AXIS = np.array([1.0, 0.0, 0.0])  # the board axis the USB port points along (in this simulation)
-WINDOWS = {"sync1": (1.5, 6.5), "curl": (8.5, 31.5), "sync2": (34.5, 39.5)}
+WINDOWS = {"sync1": (1.5, 6.5), "curl": (7.5, 31.5), "sync2": (34.5, 39.5)}
 
 
 def about(axis, degrees):
@@ -45,7 +45,7 @@ def nano_mount(tip_deg, spin_deg):
             * Rotation.from_rotvec([np.radians(tip_deg), 0, 0]) * usb_to_forearm).as_matrix()
 
 
-def timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg):
+def timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg, bent_start_deg=0.0):
     """Angles (deg) over 47 s. Every set starts and ends with the arm hanging."""
     t = np.arange(0, 47, 1 / FS)
     upper, elbow, twist, side = (np.zeros_like(t) for _ in range(4))
@@ -66,6 +66,13 @@ def timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg):
             upper += bump(t, t0, REP_S, drift_deg)
         if k + 1 == LEAN_REP:
             side += bump(t, t0, REP_S, lean_deg)        # this rep leans out sideways as it curls
+    # Reaching for the laptop with the curling hand: the arm bends to reach the keyboard, holds while
+    # Enter is pressed (the set starts at 7.5 s), drops back over 0.6 s and hangs 0.6 s before rep 1.
+    up = (t >= 6.8) & (t < 7.3)
+    elbow[up] = bent_start_deg * (1 - np.cos(np.pi * (t[up] - 6.8) / 0.5)) / 2
+    elbow[(t >= 7.3) & (t < 7.8)] = bent_start_deg
+    drop = (t >= 7.8) & (t < 8.4)
+    elbow[drop] = bent_start_deg * (1 + np.cos(np.pi * (t[drop] - 7.8) / 0.6)) / 2
     gap = (t >= 9 + 4 * REP_S) & (t < 9 + 4 * REP_S + GAP_S)
     elbow[gap] = bottom_deg                             # the elbow holds its bottom during the pause
     side += bump(t, 9 + 4 * REP_S, GAP_S, swing_deg)    # pure sideways swing between reps 4 and 5
@@ -81,9 +88,10 @@ def readings(rot, position):
 
 
 def make_session(curl_plane_deg=0.0, drift_deg=25.0, bottom_deg=0.0, twist_deg=0.0, lean_deg=0.0,
-                 swing_deg=0.0, tip_deg=0.0, spin_deg=30.0, tip_after_curls=None, seed=0):
+                 swing_deg=0.0, tip_deg=0.0, spin_deg=30.0, tip_after_curls=None, bent_start_deg=0.0, seed=0):
     rng = np.random.default_rng(seed)
-    t, upper_deg, elbow_deg, twist, side = timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg)
+    t, upper_deg, elbow_deg, twist, side = timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg,
+                                                    bent_start_deg)
     y, z = np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])
     hinge = np.array([np.sin(np.radians(curl_plane_deg)), np.cos(np.radians(curl_plane_deg)), 0.0])
     forward = np.cross(hinge, z)
@@ -171,12 +179,14 @@ def test_a_pure_sideways_swing_is_not_counted():
     assert any("not counted" in p for p in info.problems)
 
 
-def test_never_fully_lowered_shows_in_bottom_bend_not_in_range():
+def test_never_fully_lowered_still_measures_range_from_the_sets_own_bottoms():
+    # Zero is where this set's reps bottom out, so range is still top minus bottom. A whole set
+    # that never straightens therefore looks normal relative to itself; seeing that needs an
+    # absolute reference (the USB axis, PLAN.md hang offset), not the set's own bottoms.
     reps, _ = label(bottom_deg=40, drift_deg=0)
     shifted = reps[(reps["rep"] > 1) & ~reps["rep"].isin([HALF_REP, HALF_REP + 1])]
-    assert np.abs(shifted["rom_deg"] - (TOP_DEG - 40)).max() < 8   # range is still top minus bottom
-    assert np.abs(shifted["bottom_bend_deg"] - 40).max() < 6       # but the bottom is 40 deg from hanging
-    assert abs(reps.loc[reps["rep"] == 1, "bottom_bend_deg"].item()) < 6  # the set starts hanging
+    assert np.abs(shifted["rom_deg"] - (TOP_DEG - 40)).max() < 8
+    assert np.abs(shifted["bottom_bend_deg"]).max() < 6
 
 
 def test_hang_offset_is_measured_and_mounting_does_not_move_the_labels():
@@ -194,3 +204,11 @@ def test_strap_moved_between_gestures_is_flagged():
     _, info = label(tip_after_curls=25)
     assert info.slip_deg["wrist"] == pytest.approx(25, abs=3)
     assert any("a strap moved" in p for p in info.problems)
+
+
+def test_a_set_that_starts_bent_labels_like_one_that_starts_hanging():
+    # Pressing Enter with the curling hand: the arm starts 60 deg bent, then drops and settles.
+    clean, _ = label(drift_deg=0)
+    bent, info = label(drift_deg=0, bent_start_deg=60)
+    assert len(bent) == len(clean) == 8
+    assert np.abs(bent["rom_deg"].to_numpy() - clean["rom_deg"].to_numpy()).max() < 3

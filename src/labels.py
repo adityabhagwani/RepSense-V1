@@ -10,8 +10,10 @@ Think of the forearm as an airplane body with its nose toward the hand:
 
 1. track_down follows "down" as each sensor sees it: the gyro carries fast motion, the
    accelerometer slowly corrects drift.
-2. Every set starts with the arm hanging naturally. "Up" at that moment is the segment's axis
-   as its sensor sees it: the forearm's for the Nano, the upper arm's for the phone.
+2. "Up" while the arm hangs at the set's rep bottoms is the segment's axis as its sensor sees it
+   (the forearm's for the Nano, the upper arm's for the phone). Rep bottoms, not the moment Enter
+   was pressed: the arm can be bent reaching for the laptop. Anything before the arm first
+   settles there is pre-set jitter and is ignored (settle).
 3. Segment angle = angle between that axis and "up" now: 0 hanging, 90 horizontal. Rolling
    around the axis can't change it, and it doesn't care which plane you curl in.
 4. Elbow bend = forearm angle - upper-arm angle; drift = upper-arm angle. Reps = peaks.
@@ -54,6 +56,8 @@ MIN_REP_S = 0.6            # lift tops closer together than this are one lift
 MAX_AXIS_OFF_DEG = 45.0    # lift axis this far from the set's usual curl axis: not a curl (palm twist moves it ±30)
 MAX_SLIP_DEG = 10.0        # hanging "up" moving more than this between gestures: a strap moved
 MAX_HOLD_TILT_DEG = 25.0   # USB test: a reading further than this from every board axis is ambiguous
+NEAR_END_DEG = 25.0        # samples this close to an end of the swing count as time spent there
+SETTLED_DEG = 20.0         # the arm has settled once it first comes within this of its rep-bottom hang
 SHOVE_DPS_PER_G = 200.0    # when finding a still moment, 0.05 g of push counts like 10 deg/s of turning
 
 
@@ -150,17 +154,53 @@ class Bend:
     bottoms: np.ndarray
 
 
-def elbow_bend(seg: pd.DataFrame) -> Bend:
+def settle(t: np.ndarray, down: np.ndarray, gyro: np.ndarray, accel: np.ndarray, usb_axis=None):
+    """(zero, first, bottoms): where the arm hangs between reps, when it first settles there, and the
+    rep-bottom samples used.
+
+    Zero is "up" at the set's rep bottoms (median, so a lower-halfway rep can't drag it), not the
+    moment Enter was pressed: reaching for the laptop with the curling hand leaves the arm bent at
+    the start of a set. Everything before the arm first comes back near zero is pre-set jitter.
+    """
+    fs = 1 / np.median(np.diff(t))
+    # The forearm swings between two ends, hanging and the top: the two most different "down"
+    # directions in the set (each averaged over its most extreme 5% of samples). Which end is the
+    # bottom: where the USB (along the forearm, toward the elbow) points closer to straight up,
+    # when the USB axis is known; otherwise the end the arm spends more time near (it rests there
+    # between reps). On dev the time rule alone picked right in 20 of 21 sets.
+    def far_from(ref):
+        a = angle_deg(down, ref)
+        return unit(down[a >= np.percentile(a, 95)].mean(axis=0))
+    end1 = far_from(unit(down.mean(axis=0)))
+    end2 = far_from(end1)
+    if usb_axis is not None:
+        usb = unit(np.asarray(usb_axis, float))
+        bottom = end1 if angle_deg(usb, -end1) <= angle_deg(usb, -end2) else end2
+    else:
+        near1, near2 = ((angle_deg(down, e) < NEAR_END_DEG).sum() for e in (end1, end2))
+        bottom = end1 if near1 >= near2 else end2
+    rough = angle_deg(down, bottom)
+    _, dips = tops_and_bottoms(rough, fs)
+    bottoms = dips[1:-1] if len(dips) > 2 else dips  # the set's own edges may be pre- or post-set
+    zero = hang_axis(down, bottoms)
+    # The first time the forearm comes back near its hang. Moving or not: a lift can start straight
+    # from the drop after reaching for the laptop, without the arm ever stopping at the bottom.
+    settled = np.flatnonzero(segment_angle(down, zero) < SETTLED_DEG)
+    return zero, int(settled[0]) if len(settled) else 0, bottoms
+
+
+def elbow_bend(seg: pd.DataFrame, usb_axis=None) -> Bend:
     t = seg["t"].to_numpy()
     fs = 1 / np.median(np.diff(t))
-    fore_down = track_down(t, seg[GYRO].to_numpy(), seg[ACCEL].to_numpy())
+    gyro, accel = seg[GYRO].to_numpy(), seg[ACCEL].to_numpy()
+    fore_down = track_down(t, gyro, accel)
     upper_down = track_down(t, seg[UA_GYRO].to_numpy(), seg[UA_ACCEL].to_numpy())
-    start = np.arange(max(1, int(START_S * fs)))
-    fore_axis, upper_axis = hang_axis(fore_down, start), hang_axis(upper_down, start)
+    fore_axis, first, bottoms = settle(t, fore_down, gyro, accel, usb_axis)
+    upper_axis = hang_axis(upper_down, bottoms)  # the upper arm's hang at the same moments
     upper = segment_angle(upper_down, upper_axis)
     bend = segment_angle(fore_down, fore_axis) - upper
-    tops, bottoms = tops_and_bottoms(bend, fs)
-    return Bend(t, bend, upper, fore_axis, tops, bottoms)
+    tops, bottoms = tops_and_bottoms(bend[first:], fs)  # nothing before the arm settles counts
+    return Bend(t, bend, upper, fore_axis, tops + first, bottoms + first)
 
 
 @dataclass
@@ -195,12 +235,12 @@ def session_checks(aligned: pd.DataFrame, ann: pd.DataFrame, usb_axis=None) -> S
     return info
 
 
-def label_set(seg: pd.DataFrame, row) -> tuple[pd.DataFrame, list[str]]:
+def label_set(seg: pd.DataFrame, row, usb_axis=None) -> tuple[pd.DataFrame, list[str]]:
     """One row per counted lift, plus problems found while labeling this set."""
     i = int(row["set_idx"])
     if seg[UA_GYRO + UA_ACCEL].isna().any().any():
         return pd.DataFrame(), [f"set {i}: the phone recording doesn't cover this set"]
-    b = elbow_bend(seg)
+    b = elbow_bend(seg, usb_axis)
     if len(b.tops) == 0:
         return pd.DataFrame(), [f"set {i}: no lifts found"]
 
@@ -245,7 +285,7 @@ def label_session(aligned: pd.DataFrame, ann: pd.DataFrame, usb_axis=None) -> tu
     info = session_checks(aligned, ann, usb_axis)
     tables = []
     for _, row in ann[(ann["exercise"] == "curl") & (ann["status"] == "ok")].iterrows():
-        reps, problems = label_set(slice_set(aligned, row), row)
+        reps, problems = label_set(slice_set(aligned, row), row, usb_axis)
         info.problems += problems
         if not reps.empty:
             tables.append(reps)
@@ -273,7 +313,7 @@ def measure_usb_axis(df: pd.DataFrame) -> np.ndarray:
     return snapped
 
 
-def plot_sets(aligned, ann, reps, path):
+def plot_sets(aligned, ann, reps, path, usb_axis=None):
     """Elbow bend and upper-arm angle per curl set, counted lift tops and starts marked."""
     import matplotlib
     matplotlib.use("Agg")
@@ -286,7 +326,7 @@ def plot_sets(aligned, ann, reps, path):
         if seg[UA_GYRO].isna().any().any():
             ax.set_title(f"set {int(row['set_idx'])}: no phone data", fontsize=10)
             continue
-        b = elbow_bend(seg)
+        b = elbow_bend(seg, usb_axis)
         t0 = b.t[0]
         r = reps[reps["set_idx"] == row["set_idx"]] if not reps.empty else reps
         ax.plot(b.t - t0, b.bend, label="elbow bend")
@@ -334,7 +374,7 @@ def main():
     LABELS_DIR.mkdir(parents=True, exist_ok=True)
     reps.to_csv(LABELS_DIR / f"{args.session}.csv", index=False)
     plot_path = REPORTS_DIR / f"{args.session}_elbow.png"
-    plot_sets(aligned, ann, reps, plot_path)
+    plot_sets(aligned, ann, reps, plot_path, usb_axis)
 
     print(f"strap check (hanging 'up', first vs last gesture): wrist {info.slip_deg.get('wrist', np.nan):.1f}°, "
           f"upper arm {info.slip_deg.get('upper arm', np.nan):.1f}°")

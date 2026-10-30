@@ -91,6 +91,11 @@
 | 10-29 | Alternating sets never get `half_lower` marks (lift-halfway is still allowed) | You can't lower one arm halfway and then start the next lift with the other hand (dev2b set 8) |
 | 10-29 | Count ground truth = typed full reps, corrected by an append-only fix log when the raw wrist data clearly shows otherwise | dev2b sets 8 and 14: the ax humps show the typed count was off. Raw annotations are never edited |
 
+| 10-30 | Protocol: press Enter with the OTHER hand and let the sensor arm hang still for a second before lifting (receiver prompts it every set) | Pressing Enter with the curling hand left the arm bent at set start |
+| 10-30 | Teacher and learned detector measure from the hang at the set's own rep bottoms, and ignore everything before the forearm first comes back near it (`labels.settle`). Bottom vs top end of the swing picked by the USB direction when known, else by time spent near each end | Sets starting bent (dev2b 4–7) had every rep read 35° short: the detector rejected whole sets, the teacher added a lift at the start |
+
+| 10-30 | Three frozen rep counters, judged on held-out people (p2 onward): `counter-v2` (rule: hump height vs the set's typical, cut 0.825), `detector-v1` (logistic regression on 12 wrist features per hump, trained on all dev humps), `combined-v1` (a rule-counted hump counts only if the learned model gives it p ≥ 0.05, gate fixed before seeing results) | Rule never misses a real rep but counts any wiggle (33 fake reps on dev distractors); learned ignores wiggles (5) but drops unusual full reps (first, paused, slow). Dev, learned parts held out: rule 20/28 sets right (optimistic), learned 21/28, combined 23/28. Evaluate with `python -m src.detector <sessions> --evaluate` |
+
 ## Bugs and lessons
 | Date | Symptom | Cause | Fix | Lesson |
 |---|---|---|---|---|
@@ -102,6 +107,8 @@
 | 10-29 | Label maker v3 (forearm angle from its hanging axis; per-lift twist, wobble, plane tilt; lifts tilted >45° off the set's curl axis not counted) on `dev1b`: lift counts match the script in 8 of 9 scripted sets (pause set +1); twist 21–48° per rep, which explains why the rail failed; drift still marks lifts 4, 7, 10 of set 2 | Forearm angle from vertical can't be changed by twist or curl plane | Freeze the teacher here; check the pause set's extra lift later | A sideways lean shows up mostly as twist once the forearm points forward: from the wrist, lean and twist can't be fully told apart near horizontal (observability limit, report it) |
 
 | 10-30 | Nano angles on real data lagged ~1 s and flattened humps; teacher ranges wrong (half reps measured larger than full), counter 52% exact | The Arduino library's remap (x = -chip y, y = -chip x) mirrors the frame: accelerometer directions survive, gyro turns come out reversed, so following "down" with the gyro turned the wrong way and the 2% accelerometer nudge dragged it back late | Undo the mirror at load (flip z on accel and gyro); validator `check_frame` FAILs if gyro-only "down" drifts >20° in 3 s (as logged 92°, fixed 5°); clipped windows skipped | Simulated sensors were correctly handed, so tests couldn't see it. Check sensor conventions on real data with a physics consistency test. After the fix: teacher 9/9 lift counts on dev1b, sane ranges on dev2b; counter 90–95% exact on dev |
+
+| 10-30 | Learned detector zeroed whole sets (dev2b 4–7, dev1b 5, 12): 57% exact held-out | Every angle was measured from the first instant of the set; you press Enter with the curling hand, so that instant was bent. Reps read ~35° short = "lower halfway" | `settle`: zero from the set's rep bottoms, pre-set jitter dropped. Held-out: 76% exact, 90% within one, 5 fake reps in distractors (rule counter: 33). Teacher: 9/9 and 8/9 (the miss is the set where 7 lifts were done, not the scripted 8) | Numbers measured from a reference inherit its mistakes; a learned model leaning on them breaks whole sets at once. Simulation needed a realistic reach (smooth, with a hang) to test it fairly |
 
 ## Commands
 ```bash
