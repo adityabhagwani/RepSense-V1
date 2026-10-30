@@ -102,6 +102,13 @@ def to_physical(raw: pd.DataFrame) -> pd.DataFrame:
         df[name] = raw[col].to_numpy() / 1000
     for name, col in zip(GYRO, ["gx_cdps", "gy_cdps", "gz_cdps"]):
         df[name] = raw[col].to_numpy() / 100
+    # Undo a mirror. For this board the Arduino library reports x = -(chip y), y = -(chip x),
+    # which is a mirror image of the chip's axes. Directions (accelerometer) survive a mirror;
+    # turns (gyro) come out reversed, so gyro and accelerometer disagree about which way the
+    # board moved. Flipping z on both turns the mirror back into a proper frame. The USB axis
+    # (-x) is unchanged. validate.check_frame catches any frame like this.
+    df["az"] = -df["az"]
+    df["gz"] = -df["gz"]
     return df
 
 

@@ -101,6 +101,8 @@
 
 | 10-29 | Label maker v3 (forearm angle from its hanging axis; per-lift twist, wobble, plane tilt; lifts tilted >45° off the set's curl axis not counted) on `dev1b`: lift counts match the script in 8 of 9 scripted sets (pause set +1); twist 21–48° per rep, which explains why the rail failed; drift still marks lifts 4, 7, 10 of set 2 | Forearm angle from vertical can't be changed by twist or curl plane | Freeze the teacher here; check the pause set's extra lift later | A sideways lean shows up mostly as twist once the forearm points forward: from the wrist, lean and twist can't be fully told apart near horizontal (observability limit, report it) |
 
+| 10-30 | Nano angles on real data lagged ~1 s and flattened humps; teacher ranges wrong (half reps measured larger than full), counter 52% exact | The Arduino library's remap (x = -chip y, y = -chip x) mirrors the frame: accelerometer directions survive, gyro turns come out reversed, so following "down" with the gyro turned the wrong way and the 2% accelerometer nudge dragged it back late | Undo the mirror at load (flip z on accel and gyro); validator `check_frame` FAILs if gyro-only "down" drifts >20° in 3 s (as logged 92°, fixed 5°); clipped windows skipped | Simulated sensors were correctly handed, so tests couldn't see it. Check sensor conventions on real data with a physics consistency test. After the fix: teacher 9/9 lift counts on dev1b, sane ranges on dev2b; counter 90–95% exact on dev |
+
 ## Commands
 ```bash
 arduino-cli board list   # port name changes with the USB socket (usbmodem101, usbmodem1101, ...)
@@ -114,3 +116,4 @@ arduino-cli compile --upload -p /dev/cu.usbmodem1101 --fqbn arduino:mbed_nano:na
 |---|---|---|---|---|
 | 10-26 | Phase 1: firmware, receiver, flashing, validation recording, validator | 4.0 | 2.0 | Code generation was fast. Time went to the RTOS/USB bug and the mislabeled first recording. Still open: wrist strap, validator tests, stale receiver test. |
 | 10-26 → 10-28 | Phase 2 so far: phone test, sync, label maker v1, feature plan, generator review and briefs, `dev1b` recorded and processed, calibration redesign | 6.0 (whole phase) | 5.5 | Design iterations (calibration twice, teacher/student consistency) and safety-filter interruptions. Still open: label maker v2, `dev2`. Running total 7.5 h of 36. |
+| 10-29 | Phase 2 finish (label maker v3, `dev2b`) + Phase 3 (wrist-only counter, frozen as `counter-v1`) | Phase 3: 5.0 | 3.0 | Counter design was quick once the teacher work had shown the forearm angle is the clean signal. Running total 10.5 h of 36; Phase 3 was planned to end at H15, so ~4.5 h ahead. |

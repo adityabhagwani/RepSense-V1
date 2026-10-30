@@ -32,7 +32,9 @@ START_S = 0.3            # sets start with the arm hanging: the first 0.3 s give
 MIN_SPACING_S = 0.8      # two reps closer than this are one
 ANGLE_FLOOR_DEG = 15.0   # angle humps smaller than this aren't even candidates
 GYRO_FLOOR_DPS = 20.0    # same for swings in rotation speed
-HUMP_SHARE = 0.6         # a hump counts if at least this share of the set's typical hump (half reps ~0.5)
+HUMP_SHARE = 0.825       # a hump counts if at least this share of the set's typical hump. Middle of the
+                         # best dev range (0.80-0.85, 95% exact after the axis fix); dev half reps reach
+                         # 0.45-0.79, full reps 0.95+
 
 
 @dataclass

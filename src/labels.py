@@ -71,12 +71,16 @@ def axis_angle_deg(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.degrees(np.arccos(np.clip(abs(a @ b), 0.0, 1.0))))
 
 
-def track_down(t: np.ndarray, gyro_dps: np.ndarray, accel: np.ndarray) -> np.ndarray:
-    """"Down" as the sensor sees it, one unit vector per sample."""
+def track_down(t: np.ndarray, gyro_dps: np.ndarray, accel: np.ndarray, tau_s: float = TRACK_TAU_S) -> np.ndarray:
+    """"Down" as the sensor sees it, one unit vector per sample.
+
+    Each sample: turn the estimate by the gyro, then nudge it toward the accelerometer by
+    dt/(tau_s + dt), about 2% at 50 Hz with tau_s = 1 s. tau_s = inf follows the gyro alone.
+    """
     felt = unit(-accel)  # at rest the accelerometer reads "up"
     rate = np.radians(gyro_dps)
     dt = np.diff(t, prepend=t[0])
-    pull = dt / (TRACK_TAU_S + dt)  # share of the accelerometer's opinion taken each sample
+    pull = dt / (tau_s + dt)  # share of the accelerometer's opinion taken each sample
     down = np.empty_like(felt)
     down[0] = felt[0]
     for i in range(1, len(t)):

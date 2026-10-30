@@ -48,6 +48,12 @@ MIN_MOVING_FRACTION = 0.3
 MIN_S_PER_REP = 0.8             # faster than this is not a real rep
 MAX_S_PER_REP = 10.0            # slower usually means idle time inside the set window
 
+# Axes: gyro and accelerometer must agree about which way the board turned (validate.check_frame).
+FRAME_WINDOW_S = 3.0
+FRAME_MOVING_DPS = 30.0         # windows without this much rotation are skipped
+FRAME_MIN_WINDOWS = 5
+MAX_FRAME_DEG = 20.0            # dev2b: 5 deg median with consistent axes, 92 deg when mirrored
+
 LEVELS = ["PASS", "WARN", "FAIL"]
 
 
@@ -150,8 +156,36 @@ def check_set(set_df: pd.DataFrame, row) -> list[Check]:
     return checks
 
 
+def check_frame(df: pd.DataFrame) -> list[Check]:
+    """Do the gyro's turns agree with the accelerometer's "down"? A mirrored axis makes them disagree.
+
+    In each 3 s window with movement, follow "down" with the gyro alone and compare where it ends
+    up with where the accelerometer says down is. Consistent axes: a few degrees of drift.
+    Mirrored axes: the gyro turns the estimate the wrong way, ~90 degrees off.
+    """
+    from src.labels import angle_deg, track_down  # local: labels imports modules that import this one's peers
+
+    t, accel, gyro = df["t"].to_numpy(), df[ACCEL].to_numpy(), df[GYRO].to_numpy()
+    n = int(FRAME_WINDOW_S / np.median(np.diff(t)))
+    errors = []
+    for s in range(0, len(t) - n, n):
+        if np.linalg.norm(gyro[s:s + n], axis=1).max() < FRAME_MOVING_DPS:
+            continue  # a still window can't tell turning one way from the other
+        if (np.abs(gyro[s:s + n]) >= GYRO_CLIP_DPS).any() or (np.abs(accel[s:s + n]) >= ACCEL_CLIP_G).any():
+            continue  # a clipped gyro under-reports turns, which would look like a frame problem
+        down = track_down(t[s:s + n], gyro[s:s + n], accel[s:s + n], tau_s=np.inf)
+        felt = -accel[s + n - 1] / np.linalg.norm(accel[s + n - 1])
+        errors.append(float(angle_deg(down[-1], felt)))
+    if len(errors) < FRAME_MIN_WINDOWS:
+        return [Check("file", "axes", "WARN", f"only {len(errors)} windows with movement: can't check")]
+    median = float(np.median(errors))
+    return [Check("file", "axes", "PASS" if median <= MAX_FRAME_DEG else "FAIL",
+                  f"gyro-only 'down' after {FRAME_WINDOW_S:g} s off by {median:.0f}° median "
+                  f"(want ≤{MAX_FRAME_DEG:g}; mirrored axes give ~90)")]
+
+
 def validate(df: pd.DataFrame, ann: pd.DataFrame) -> list[Check]:
-    checks = check_timing(df)
+    checks = check_timing(df) + check_frame(df)
     for _, row in ann[ann["status"] == "ok"].iterrows():
         checks += check_set(slice_set(df, row), row)
     return checks
