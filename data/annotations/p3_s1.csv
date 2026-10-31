@@ -1,0 +1,4 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+p3_s1,p3,1,sync,0,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",1793403144.6045,1793403149.8885,267,0,ok
+p3_s1,p3,2,curl,9,9,alternating,"Alternate arms; count only the sensor arm's lifts. Count out loud: 10 lifts. Lift 6: lift only until your forearm is level, then lower. All other lifts: full and strict.",1793403206.8285,1793403235.1373,1428,0,ok
+p3_s1,p3,3,curl,7,7,slow,"Slow: 3 s up, 3 s down. Count out loud: 7 lifts. All full and strict.",1793403401.3226,1793403434.1209,1654,0,ok
