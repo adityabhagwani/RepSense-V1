@@ -1,0 +1,7 @@
+session,participant,set_idx,exercise,scripted_reps,actual_reps,condition,notes,start_host_t,end_host_t,n_samples,dropped,status
+band_test,p1,1,sync,0,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",1793677023.0996,1793677029.7059,333,0,ok
+band_test,p1,2,curl,10,10,normal,Count out loud: 10 lifts. All full and strict.,1793677044.2556,1793677079.6856,1785,0,ok
+band_test,p1,3,curl,8,8,drift,"Count out loud: 8 lifts. Lifts 2, 4, 6 and 8: let your elbow swing forward as you lift, then bring it back. All other lifts: full and strict.",1793677092.3495,1793677117.1798,1251,0,ok
+band_test,p1,4,curl,10,10,fast,Fast: as fast as you can while staying in control. Count out loud: 10 lifts. All full and strict.,1793677130.7611,1793677154.2997,1186,0,ok
+band_test,p1,5,curl,10,10,normal,Count out loud: 10 lifts. All full and strict.,1793677162.4347,1793677200.0534,1897,0,ok
+band_test,p1,6,sync,0,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",1793677209.2045,1793677217.9520,441,0,ok
