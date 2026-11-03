@@ -54,7 +54,7 @@ STILL_S = 0.5              # stillest stretch around a gesture = arm hanging
 MIN_REP_DEG = 25.0         # a lift bends the elbow at least this much (half reps are ~60 deg)
 MIN_REP_S = 0.6            # lift tops closer together than this are one lift
 MAX_AXIS_OFF_DEG = 45.0    # lift axis this far from the set's usual curl axis: not a curl (palm twist moves it ±30)
-MAX_SLIP_DEG = 10.0        # hanging "up" moving more than this between gestures: a strap moved
+MAX_SLIP_DEG = 10.0        # one sensor's hanging "up" moving this much more than the other's: a strap moved
 MAX_HOLD_TILT_DEG = 25.0   # USB test: a reading further than this from every board axis is ambiguous
 NEAR_END_DEG = 25.0        # samples this close to an end of the swing count as time spent there
 SETTLED_DEG = 20.0         # the arm has settled once it first comes within this of its rep-bottom hang
@@ -223,10 +223,13 @@ def session_checks(aligned: pd.DataFrame, ann: pd.DataFrame, usb_axis=None) -> S
                       unit(seg[UA_ACCEL].to_numpy()[quiet].mean(axis=0))))
     (f_first, u_first), (f_last, u_last) = found[0], found[-1]
     info = SessionInfo([], {"wrist": float(angle_deg(f_first, f_last)), "upper arm": float(angle_deg(u_first, u_last))})
-    for sensor, deg in info.slip_deg.items():
-        if deg > MAX_SLIP_DEG:
-            info.problems.append(f"{sensor}: hanging 'up' moved {deg:.0f}° between gestures "
-                                 f"(want ≤{MAX_SLIP_DEG:g}): a strap moved")
+    # The gesture keeps the elbow locked, so if the whole arm hangs at a new angle, both sensors' "up"
+    # turns by the same amount. A strap that moved turns only its own sensor. Flag the difference.
+    gap = info.slip_deg["upper arm"] - info.slip_deg["wrist"]
+    if abs(gap) > MAX_SLIP_DEG:
+        moved, other = ("upper arm", "wrist") if gap > 0 else ("wrist", "upper arm")
+        info.problems.append(f"{moved}: hanging 'up' moved {info.slip_deg[moved]:.0f}° between gestures, "
+                             f"{abs(gap):.0f}° more than the {other} (want ≤{MAX_SLIP_DEG:g}): a strap moved")
     if len(found) == 1:
         info.problems.append("only one gesture: strap movement can't be checked")
     if usb_axis is not None:
@@ -377,7 +380,8 @@ def main():
     plot_sets(aligned, ann, reps, plot_path, usb_axis)
 
     print(f"strap check (hanging 'up', first vs last gesture): wrist {info.slip_deg.get('wrist', np.nan):.1f}°, "
-          f"upper arm {info.slip_deg.get('upper arm', np.nan):.1f}°")
+          f"upper arm {info.slip_deg.get('upper arm', np.nan):.1f}° (equal = the arm hung differently; "
+          f"a gap over {MAX_SLIP_DEG:g}° = a strap moved)")
     if usb_axis is None:
         print("hang offset: USB axis not measured yet (record the Nano held still, USB up, then --measure-usb)")
     else:

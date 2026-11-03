@@ -88,10 +88,13 @@ def readings(rot, position):
 
 
 def make_session(curl_plane_deg=0.0, drift_deg=25.0, bottom_deg=0.0, twist_deg=0.0, lean_deg=0.0,
-                 swing_deg=0.0, tip_deg=0.0, spin_deg=30.0, tip_after_curls=None, bent_start_deg=0.0, seed=0):
+                 swing_deg=0.0, tip_deg=0.0, spin_deg=30.0, tip_after_curls=None, bent_start_deg=0.0,
+                 hang_after_curls_deg=0.0, seed=0):
     rng = np.random.default_rng(seed)
     t, upper_deg, elbow_deg, twist, side = timeline(drift_deg, bottom_deg, twist_deg, lean_deg, swing_deg,
                                                     bent_start_deg)
+    ramp = np.clip(t - 32.5, 0, 1)  # after the curls the whole straight arm settles further forward
+    upper_deg = upper_deg + hang_after_curls_deg * ramp * ramp * (3 - 2 * ramp)
     y, z = np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])
     hinge = np.array([np.sin(np.radians(curl_plane_deg)), np.cos(np.radians(curl_plane_deg)), 0.0])
     forward = np.cross(hinge, z)
@@ -203,7 +206,16 @@ def test_hang_offset_is_measured_and_mounting_does_not_move_the_labels():
 def test_strap_moved_between_gestures_is_flagged():
     _, info = label(tip_after_curls=25)
     assert info.slip_deg["wrist"] == pytest.approx(25, abs=3)
-    assert any("a strap moved" in p for p in info.problems)
+    assert any(p.startswith("wrist") and "a strap moved" in p for p in info.problems)
+
+
+def test_arm_hanging_at_a_new_angle_is_not_a_strap_moving():
+    # The last gesture starts with the straight arm hanging 15 deg further forward: both sensors' "up"
+    # turns 15 deg, which the old per-sensor check called two moved straps.
+    _, info = label(hang_after_curls_deg=15)
+    assert info.slip_deg["wrist"] == pytest.approx(15, abs=3)
+    assert info.slip_deg["upper arm"] == pytest.approx(15, abs=3)
+    assert not any("a strap moved" in p for p in info.problems)
 
 
 def test_a_set_that_starts_bent_labels_like_one_that_starts_hanging():
