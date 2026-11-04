@@ -1,0 +1,16 @@
+exercise,reps,condition,notes,marked
+sync,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",
+curl,11,slow,"Slow: 3 s up, 3 s down. Count out loud: 12 lifts. Lift 6: lift only until your forearm is level, then lower. All other lifts: full and strict.",6:half_lift
+curl,10,drift,"Count out loud: 10 lifts. Lifts 2, 6 and 9: let your elbow swing forward as you lift, then bring it back. All other lifts: full and strict.",2:drift;6:drift;9:drift
+curl,6,fast,Fast: as fast as you can while staying in control. Count out loud: 6 lifts. All full and strict.,
+curl,5,pause,"Count out loud: 5 lifts. Lift 4: hold 2–3 s halfway up, then finish it. All other lifts: full and strict.",4:pause
+curl,7,partial,"Count out loud: 11 lifts. Lifts 4 and 8: lift only until your forearm is level, then lower. Lifts 2 and 10: lower only until your forearm is level, then start the next lift. All other lifts: full and strict.",2:half_lower;4:half_lift;8:half_lift;10:half_lower
+rerack,0,distractor,"Put the dumbbell down and pick it up again, three times. Not a set.",
+curl,9,alternating,"Alternate arms; count only the sensor arm's lifts. Count out loud: 10 lifts. Lift 8: lift only until your forearm is level, then lower. All other lifts: full and strict.",8:half_lift
+adjust,0,distractor,"Shake out your arm and fiddle with the strap for about 15 s, without moving the band. Not a set.",
+curl,10,partial,"Count out loud: 14 lifts. Lifts 6 and 11: lift only until your forearm is level, then lower. Lifts 12 and 13: lower only until your forearm is level, then start the next lift. All other lifts: full and strict.",6:half_lift;11:half_lift;12:half_lower;13:half_lower
+walk,0,distractor,"Walk around for about 15 s, arms natural. Not a set: the counter should say 0.",
+curl,6,normal,"Count out loud: 7 lifts. Lift 6: lift only until your forearm is level, then lower. All other lifts: full and strict.",6:half_lift
+curl,9,drift,"Count out loud: 9 lifts. Lifts 3, 5 and 6: let your elbow swing forward as you lift, then bring it back. All other lifts: full and strict.",3:drift;5:drift;6:drift
+curl,0,exhaustion,Curl until you can't do one more full rep. Count full reps only and TYPE that count at the prompt (Enter would record 0).,
+sync,0,gesture,"Same pendulum swings: elbow locked, palm facing your thigh, forward and back only.",

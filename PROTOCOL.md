@@ -1,7 +1,7 @@
-# RepSense data collection protocol: p2 and p3
+# RepSense data collection protocol: p2 to p5
 
 **Goal:** the first fair test of the three frozen rep counters (`counter-v2`, `detector-v1`, `combined-v1`).
-They have never seen p2 or p3, and **nothing gets tuned on this data**.
+They have never seen p2 to p5, and **nothing gets tuned on this data**.
 
 **Plan:** 2 friends × 2 sessions each, about 20 minutes per session. If someone is short on time, session 1 alone still counts.
 
@@ -10,10 +10,11 @@ They have never seen p2 or p3, and **nothing gets tuned on this data**.
 | `p2_s1` | p2 | `protocols/p2_s1.csv` | Position A |
 | `p2_s2` | p2 | `protocols/p2_s2.csv` | Position B |
 | `p3_s1` | p3 | `protocols/p3_s1.csv` | Position A (cut short after set 3: tape broke) |
-| `p3_s1b` | p3 | `protocols/p3_s1b.csv` | Position A (redo of `p3_s1`) |
 | `p3_s2` | p3 | `protocols/p3_s2.csv` | Position B |
 | `p4_s1` | p4 | `protocols/p4_s1.csv` | Position A |
 | `p4_s2` | p4 | `protocols/p4_s2.csv` | Position B |
+| `p5_s1` | p5 | `protocols/p5_s1.csv` | Position A |
+| `p5_s2` | p5 | `protocols/p5_s2.csv` | Position B |
 
 ---
 
@@ -50,7 +51,7 @@ All tests should pass. The Nano's orange LED should blink once a second.
 
 ## 3. When a friend arrives (~12 min before recording)
 **Consent and ID (2 min).** Tell them, in your own words:
-- We record motion from a sensor on the wrist and a phone on the upper arm. No video, no name; they're **p2** (or **p3**) in the files.
+- We record motion from a sensor on the wrist and a phone on the upper arm. No video, no name; they're **p2**, **p3**, **p4** or **p5** in the files.
 - It's a college project; the data stays in the project.
 - They can stop any time.
 
@@ -168,20 +169,20 @@ The other sessions have the same kinds of sets in a different, shuffled order:
 - `p3_s1`: swing → alternating → slow → normal → adjust → walk → drift → partial → fast → pause → drift → partial → re-rack → exhaustion → swing
 - `p3_s2`: swing → walk → fast → alternating → partial → slow → partial → normal → drift → adjust → pause → drift → re-rack → exhaustion → swing
 
-### Two people at once (11-03: p3 and p4), about 2 h 10
+### Two people at once (11-03: p4 and p5), about 2 h 10
 Alternate people so each gets ~45 min between their own sessions, not 5: the first session's exhaustion set
 would otherwise tire the second. All the session-1s go first, so if someone leaves early they still have one.
 
 | Clock | What |
 |---|---|
 | 0:00 | Both: consent, briefing and practice together (~10 min) |
-| 0:10 | Mount p3, position A. `p3_s1b` (p4 watches: it's their practice) |
-| 0:32 | Export, validate. Move the Nano and armband to p4, position A |
-| 0:40 | `p4_s1` |
-| 1:02 | Export, validate. Mount p3, **position B**, new line |
-| 1:10 | `p3_s2` |
-| 1:32 | Export, validate. Mount p4, **position B**, new line |
-| 1:40 | `p4_s2` |
+| 0:10 | Mount p4, position A. `p4_s1` (p5 watches: it's their practice) |
+| 0:32 | Export, validate. Move the Nano and armband to p5, position A |
+| 0:40 | `p5_s1` |
+| 1:02 | Export, validate. Mount p4, **position B**, new line |
+| 1:10 | `p4_s2` |
+| 1:32 | Export, validate. Mount p5, **position B**, new line |
+| 1:40 | `p5_s2` |
 | 2:02 | Export, validate. Done |
 
 ---
