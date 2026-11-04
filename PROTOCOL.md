@@ -9,8 +9,11 @@ They have never seen p2 or p3, and **nothing gets tuned on this data**.
 |---|---|---|---|
 | `p2_s1` | p2 | `protocols/p2_s1.csv` | Position A |
 | `p2_s2` | p2 | `protocols/p2_s2.csv` | Position B |
-| `p3_s1` | p3 | `protocols/p3_s1.csv` | Position A |
+| `p3_s1` | p3 | `protocols/p3_s1.csv` | Position A (cut short after set 3: tape broke) |
+| `p3_s1b` | p3 | `protocols/p3_s1b.csv` | Position A (redo of `p3_s1`) |
 | `p3_s2` | p3 | `protocols/p3_s2.csv` | Position B |
+| `p4_s1` | p4 | `protocols/p4_s1.csv` | Position A |
+| `p4_s2` | p4 | `protocols/p4_s2.csv` | Position B |
 
 ---
 
@@ -165,6 +168,22 @@ The other sessions have the same kinds of sets in a different, shuffled order:
 - `p3_s1`: swing → alternating → slow → normal → adjust → walk → drift → partial → fast → pause → drift → partial → re-rack → exhaustion → swing
 - `p3_s2`: swing → walk → fast → alternating → partial → slow → partial → normal → drift → adjust → pause → drift → re-rack → exhaustion → swing
 
+### Two people at once (11-03: p3 and p4), about 2 h 10
+Alternate people so each gets ~45 min between their own sessions, not 5: the first session's exhaustion set
+would otherwise tire the second. All the session-1s go first, so if someone leaves early they still have one.
+
+| Clock | What |
+|---|---|
+| 0:00 | Both: consent, briefing and practice together (~10 min) |
+| 0:10 | Mount p3, position A. `p3_s1b` (p4 watches: it's their practice) |
+| 0:32 | Export, validate. Move the Nano and armband to p4, position A |
+| 0:40 | `p4_s1` |
+| 1:02 | Export, validate. Mount p3, **position B**, new line |
+| 1:10 | `p3_s2` |
+| 1:32 | Export, validate. Mount p4, **position B**, new line |
+| 1:40 | `p4_s2` |
+| 2:02 | Export, validate. Done |
+
 ---
 
 ## 7. Processing (after everyone has left, ~15 min)
@@ -197,3 +216,4 @@ Sync should show a match of **0.8 or higher** at both gestures. Labels may repor
 | Sync "weak match" at a gesture | The swing probably went sideways or the elbow bent. The session is still usable; note it. |
 | Labels: "a strap moved" | Expected if you wrote down a strap problem. Otherwise note it in `sessions.csv`. |
 | Friend needs to stop | Press `q`. Everything recorded so far is kept; finish later with `--resume`. |
+| Session cut short for good | Press `q` **right away**. A receiver left waiting keeps logging the idle arm (`p3_s1` logged 84 min that way). |
