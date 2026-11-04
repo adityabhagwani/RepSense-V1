@@ -6,7 +6,8 @@ import pandas as pd
 from scipy.spatial.transform import Rotation
 
 import src.detector as detector
-from src.detector import FEATURES, combined_count, count_with, hump_features, label_humps, train
+from src.detector import (FEATURES, MIN_REPS_GAP_S, combined_count, count_with, hump_features, label_humps,
+                          min_reps, train)
 from test_counter import FS, FULL, HALF, elevation
 
 
@@ -146,3 +147,19 @@ def test_combined_keeps_rule_humps_that_look_like_curls_and_vetoes_the_rest():
 def test_combined_drops_rule_humps_with_no_learned_hump_nearby():
     assert combined_count([1.0, 9.0], np.array([1.0]), np.array([0.9])) == 1
     assert combined_count([1.0], np.array([]), np.array([])) == 0
+
+
+def test_min_reps_drops_a_rep_with_no_other_rep_near_it():
+    # a set of 4, then a stray bend 20 s after its last rep
+    assert min_reps([2.0, 4.5, 7.0, 9.5, 29.5]).tolist() == [2.0, 4.5, 7.0, 9.5]
+    assert min_reps([5.0]).tolist() == [] and min_reps([]).tolist() == []
+
+
+def test_min_reps_keeps_reps_exactly_the_gap_apart_and_drops_just_beyond():
+    assert min_reps([0.0, MIN_REPS_GAP_S]).tolist() == [0.0, MIN_REPS_GAP_S]
+    assert min_reps([0.0, MIN_REPS_GAP_S + 0.1]).tolist() == []
+
+
+def test_min_reps_keeps_a_slow_set_whole():
+    slow = [0.0, 9.7, 19.4, 29.1]  # the longest lift-to-lift time seen in a real set
+    assert min_reps(slow).tolist() == slow

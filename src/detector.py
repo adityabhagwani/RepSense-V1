@@ -39,6 +39,9 @@ MODEL_PATH = MODELS_DIR / "detector.joblib"
 GATE = 0.05      # combined: a rule-counted hump must look at least this likely to be a full rep to the
                  # learned model; set before seeing combined results, not tuned
 MATCH_S = 0.6    # a rule hump and a learned hump this close in time are the same hump
+MIN_REPS_GAP_S = 12.0  # min-reps-v1 (frozen 11-04): a combined-counted rep counts only if another one
+                       # peaks within this many seconds. Bends that leak through the veto in
+                       # distractors come one at a time; the longest gap between lifts in a set is 9.7 s
 SCRIPTED = ("normal", "slow", "fast", "pause", "alternating", "partial", "drift")
 FEATURES = [
     "height_deg",      # how far the hump rises above the dips beside it
@@ -148,28 +151,45 @@ def count_with(model, humps: pd.DataFrame) -> pd.Series:
     return pd.Series(p >= 0.5, index=humps.index).groupby([humps["session"], humps["set_idx"]]).sum()
 
 
-def combined_count(rule_times, tops: np.ndarray, p: np.ndarray) -> int:
+def combined_times(rule_times, tops: np.ndarray, p: np.ndarray) -> np.ndarray:
     """The rule decides full vs half (height); the learned model vetoes humps that aren't curls at all.
 
     Each rule-counted hump is matched to the learned hump nearest in time; it counts only if one is
-    within MATCH_S and the learned model gives it p >= GATE.
+    within MATCH_S and the learned model gives it p >= GATE. Returns the times of the humps kept.
     """
+    rule_times = np.asarray(rule_times, float)
     if len(tops) == 0:
-        return 0
+        return rule_times[:0]
     nearest = [int(np.argmin(np.abs(tops - x))) for x in rule_times]
-    return int(sum(abs(tops[k] - x) <= MATCH_S and p[k] >= GATE for k, x in zip(nearest, rule_times)))
+    keep = [abs(tops[k] - x) <= MATCH_S and p[k] >= GATE for k, x in zip(nearest, rule_times)]
+    return rule_times[np.array(keep, bool)]
+
+
+def combined_count(rule_times, tops: np.ndarray, p: np.ndarray) -> int:
+    return len(combined_times(rule_times, tops, p))
+
+
+def min_reps(times) -> np.ndarray:
+    """min-reps-v1: the reps (times) that have another rep within MIN_REPS_GAP_S, on either side."""
+    times = np.sort(np.asarray(times, float))
+    if len(times) < 2:
+        return times[:0]
+    close = np.diff(times) <= MIN_REPS_GAP_S
+    return times[np.r_[False, close] | np.r_[close, False]]
 
 
 def add_counts(sets: pd.DataFrame, humps: pd.DataFrame, p: pd.Series) -> pd.DataFrame:
-    """learned_count and combined_count per set, given a probability for every hump."""
+    """learned_count, combined_count and min_reps_count per set, given a probability for every hump."""
     out = sets.copy()
-    for col in ("learned_count", "combined_count"):
+    for col in ("learned_count", "combined_count", "min_reps_count"):
         out[col] = 0
     for k, r in out.iterrows():
         mine = (humps["session"] == r["session"]) & (humps["set_idx"] == r["set_idx"])
         tops, probs = humps.loc[mine, "t_top"].to_numpy(), p[mine].to_numpy()
+        kept = combined_times(r["rule_times"], tops, probs)
         out.loc[k, "learned_count"] = int((probs >= 0.5).sum())
-        out.loc[k, "combined_count"] = combined_count(r["rule_times"], tops, probs)
+        out.loc[k, "combined_count"] = len(kept)
+        out.loc[k, "min_reps_count"] = len(min_reps(kept))
     return out
 
 
@@ -196,9 +216,11 @@ def main():
     parser = argparse.ArgumentParser(description="Train and check the learned rep detector, or evaluate frozen versions.")
     parser.add_argument("sessions", nargs="+")
     parser.add_argument("--evaluate", action="store_true",
-                        help="count these sessions with the frozen rule, learned and combined versions (no training)")
+                        help="count these sessions with the frozen rule, learned, combined and min-reps versions "
+                             "(no training)")
     args = parser.parse_args()
-    cols = ["session", "set_idx", "condition", "true_reps", "rule_count", "learned_count", "combined_count"]
+    cols = ["session", "set_idx", "condition", "true_reps", "rule_count", "learned_count", "combined_count",
+            "min_reps_count"]
 
     humps, sets = build_dataset(args.sessions)
     if args.evaluate:
@@ -218,6 +240,7 @@ def main():
     print(summarize(result, "rule_count") + "   (rule cut tuned on all of dev: optimistic)")
     print(summarize(result, "learned_count") + "   (each session held out)")
     print(summarize(result, "combined_count") + "   (learned part held out)")
+    print(summarize(result, "min_reps_count") + "   (learned part held out)")
 
     model = train(humps)
     MODELS_DIR.mkdir(exist_ok=True)
