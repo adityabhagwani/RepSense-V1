@@ -10,6 +10,9 @@ an optional "unfamiliar exercise" test via --exercises, normal sets only):
   - 2 partial sets with 4 half reps each: 2 lift halfway, 2 lower halfway
   - 2 drift sets with 3 drift reps each
   - DISTRACTORS: movement that isn't reps (reps = 0); the counter should say 0
+  - any curl lift set: a REST_CHANCE chance of one rest in the middle (after a lift that isn't the
+    first or last, the arm hangs still for 5, 10 or 15 s, then the set carries on). Added 11-04:
+    spliced sets showed a rest at the bottom breaks the count most often, and no recorded set had one
 
 `reps` is full reps only: the true count. A movement is any lift, half reps included, numbered
 from 1. `marked` lists the scripted ones as movement:kind (see dataio), so analysis never parses
@@ -32,7 +35,8 @@ from pathlib import Path
 
 import numpy as np
 
-from src.dataio import HALF_KINDS, MARK_KINDS, annotation_path, format_marked, movement_count, parse_marked
+from src.dataio import (HALF_KINDS, MARK_KINDS, REST_KINDS, REST_SECONDS, annotation_path, format_marked,
+                        movement_count, parse_marked)
 
 PROTOCOLS_DIR = Path(__file__).resolve().parent.parent / "protocols"
 FIELDS = ["exercise", "reps", "condition", "notes", "marked"]
@@ -42,6 +46,7 @@ MIN_REPS, MAX_REPS = 5, 12
 NORMAL_SETS = 1                   # per exercise
 CURL_STYLES = ["slow", "fast", "pause", "alternating"]  # one set each, curls only
 EXTRA_HALF_CHANCE = 0.5           # normal and style sets: one extra half rep
+REST_CHANCE = 0.5                 # any curl lift set: one rest in the middle, REST_SECONDS long (dataio)
 PARTIAL_SETS = 2
 PARTIAL_KINDS = ["half_lift", "half_lift", "half_lower", "half_lower"]
 DRIFT_SETS, DRIFT_PER_SET = 2, 3
@@ -60,6 +65,8 @@ HALF_HOW = {
 OTHER_HOW = {
     "drift": "let your elbow swing forward as you lift, then bring it back",
     "pause": "hold 2–3 s halfway up, then finish it",
+    **{k: f"after it, lower all the way and let the arm hang still for {s} s (count it out loud), then carry on"
+       for k, s in zip(REST_KINDS, REST_SECONDS)},
 }
 STYLE_NOTES = {
     "slow": "Slow: 3 s up, 3 s down.",
@@ -89,7 +96,7 @@ def place_marks(rng: np.random.Generator, movements: int, kinds: list[str]) -> d
         picks = rng.choice(np.arange(2, movements), size=len(kinds), replace=False)
         marks = {int(m): kind for m, kind in zip(picks, kinds)}
         if not any(k == "half_lower" and marks.get(m + 1) in ("half_lift", "pause") for m, k in marks.items()):
-            return marks
+            return marks  # a rest sits on its own lift, so that lift is always lowered all the way
 
 
 def lift_numbers(movements: list[int]) -> str:
@@ -111,7 +118,10 @@ def lift_set(rng: np.random.Generator, exercise: str, condition: str) -> dict:
             # Alternating: you can't lower one arm halfway, then start the next lift with the other hand.
             options = ["half_lift"] if condition == "alternating" else HALF_KINDS
             kinds.append(str(rng.choice(options)))
-    marks = place_marks(rng, reps + sum(k in HALF_KINDS for k in kinds), kinds)
+    movements = reps + sum(k in HALF_KINDS for k in kinds)
+    if exercise == "curl" and rng.random() < REST_CHANCE and len(kinds) < movements - 2:
+        kinds.append(f"rest{rng.choice(REST_SECONDS)}")  # skipped only when no free middle lift is left
+    marks = place_marks(rng, movements, kinds)
 
     notes = [STYLE_NOTES[condition]] if condition in STYLE_NOTES else []
     notes.append(f"Count out loud: {movement_count(reps, marks)} lifts.")
@@ -194,8 +204,10 @@ def main():
         sys.exit(str(e))
 
     n, half, drift = shares(rows)
+    rests = [k for r in rows for k in parse_marked(r["marked"]).values() if k in REST_KINDS]
     print(f"wrote {path.relative_to(PROTOCOLS_DIR.parent)}: {len(rows)} rows, {n} scripted movements, "
-          f"{half:.0%} half reps, {drift:.0%} drift reps")
+          f"{half:.0%} half reps, {drift:.0%} drift reps, {len(rests)} sets with a rest "
+          f"({', '.join(sorted(rests)) or 'none'})")
 
 
 if __name__ == "__main__":

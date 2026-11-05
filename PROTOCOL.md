@@ -73,6 +73,7 @@ Then add their row to `data/sessions.csv` once the session is recorded.
 | "Lower only until your forearm is level" | Lift fully, come down only to horizontal, then start the next lift from there. **Not a full rep.** |
 | "Let your elbow swing forward" | Let the upper arm drift forward as you lift, then bring it back. **Still a full rep.** |
 | "Hold 2–3 s halfway up" | Stop halfway, hold, then finish the lift. **Still a full rep.** |
+| "Lift N: after it, … hang still for 10 s" | After that lift, lower all the way and let the arm hang still while you count the seconds out loud, then carry on. In an alternating set both arms rest. **Still full reps; the rest changes no count.** |
 | Slow / fast | Slow: 3 s up, 3 s down. Fast: as fast as you can with control. |
 | Alternating | Take turns with both arms; only the **sensor arm's** lifts count |
 | Distractor sets | Walk, re-rack the dumbbell, fiddle with the strap. Not exercise: just move naturally. |
@@ -164,10 +165,12 @@ Between session 1 and session 2: a 5-minute break, then re-strap to **position B
 | 18:30 | 14 | Exhaustion | ? | To failure; **type** their full-rep count |
 | 19:40 | 15 | Swing gesture | | Same 3 pendulum swings |
 
-The other sessions have the same kinds of sets in a different, shuffled order:
-- `p2_s2`: swing → slow → partial → re-rack → normal → pause → drift → drift → alternating → adjust → fast → walk → partial → exhaustion → swing
+The other sessions have the same kinds of sets in a different, shuffled order. From 11-04 on, about half the curl sets also have one rest in the middle (5, 10 or 15 s), shown in brackets:
 - `p3_s1`: swing → alternating → slow → normal → adjust → walk → drift → partial → fast → pause → drift → partial → re-rack → exhaustion → swing
-- `p3_s2`: swing → walk → fast → alternating → partial → slow → partial → normal → drift → adjust → pause → drift → re-rack → exhaustion → swing
+- `p2_s2`: swing → adjust → fast → walk → slow → re-rack → alternating (rest 15 s) → normal → drift → drift (rest 10 s) → partial → partial (rest 15 s) → pause → exhaustion → swing
+- `p3_s2`: swing → re-rack → normal → slow (rest 10 s) → adjust → walk → alternating (rest 5 s) → pause (rest 10 s) → fast → partial (rest 10 s) → partial → drift (rest 10 s) → drift → exhaustion → swing
+- `p4_s2`: swing → walk → normal (rest 5 s) → drift → partial → fast → slow (rest 15 s) → alternating (rest 15 s) → re-rack → drift → partial (rest 5 s) → pause (rest 10 s) → adjust → exhaustion → swing
+- `p5_s2`: swing → normal → partial (rest 10 s) → adjust → alternating → drift → slow → walk → re-rack → fast (rest 15 s) → pause (rest 10 s) → drift (rest 15 s) → partial → exhaustion → swing
 
 ### Two people at once (11-03: p4 and p5), about 2 h 10
 Alternate people so each gets ~45 min between their own sessions, not 5: the first session's exhaustion set

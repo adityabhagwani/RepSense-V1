@@ -23,12 +23,12 @@ import sys
 import numpy as np
 import pandas as pd
 
-from src.dataio import DATA_DIR, annotation_path, load_annotations, movement_count, parse_marked
+from src.dataio import DATA_DIR, REST_KINDS, annotation_path, load_annotations, movement_count, parse_marked
 from src.labels import LABELS_DIR
 from src.make_script import LIFT_CONDITIONS, PROTOCOLS_DIR
 
 CHECK_MARKS_DIR = DATA_DIR / "check_marks"
-KINDS = ("full", "half_lift", "half_lower", "drift", "pause")
+KINDS = ("full", "half_lift", "half_lower", "drift", "pause", *REST_KINDS)
 SUMMARY_COLUMNS = ["rom_deg", "end_gap_deg", "drift_deg", "up_s"]  # one per kind
 MOVE_COLUMNS = ["set_idx", "exercise", "condition", "movement", "kind"]
 TEACHER_COLUMNS = ["rom_deg", "top_gap_deg", "start_gap_deg", "end_gap_deg", "drift_deg", "up_s", "down_s"]

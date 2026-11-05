@@ -19,7 +19,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.dataio import ACCEL, GYRO, load_annotations, load_session, rotation_speed, slice_set
+from src.dataio import ACCEL, GYRO, REST_KINDS, load_annotations, load_session, parse_marked, rotation_speed, slice_set
+from src.make_script import PROTOCOLS_DIR
 from src.record import MIN_SET_SECONDS
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
@@ -98,8 +99,21 @@ def quietest_window(set_df: pd.DataFrame) -> pd.DataFrame:
     return set_df.iloc[start:start + n]
 
 
-def check_set(set_df: pd.DataFrame, row) -> list[Check]:
-    """Layers 2 and 3 for one set: sensor health, then label versus signal."""
+def scripted_rest_s(session: str) -> dict[int, float]:
+    """Seconds of scripted rest (restN marks) per set, from the session's script if it has marks."""
+    path = PROTOCOLS_DIR / f"{session}.csv"
+    if not path.exists():
+        return {}
+    script = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if "marked" not in script.columns:
+        return {}
+    return {i + 1: float(sum(int(k[4:]) for k in parse_marked(m).values() if k in REST_KINDS))
+            for i, m in enumerate(script["marked"])}
+
+
+def check_set(set_df: pd.DataFrame, row, rest_s: float = 0.0) -> list[Check]:
+    """Layers 2 and 3 for one set: sensor health, then label versus signal. rest_s = the set's scripted
+    rest, which the movement and pace checks leave out (a done-right rest isn't idle time)."""
     scope = f"{int(row['set_idx'])} {row['exercise']}"
     checks = []
 
@@ -145,12 +159,13 @@ def check_set(set_df: pd.DataFrame, row) -> list[Check]:
             add("gyro offset", "PASS" if bias <= MAX_GYRO_BIAS_DPS else "WARN",
                 f"{bias:.2f} deg/s largest axis at rest (want ≤{MAX_GYRO_BIAS_DPS:g})")
     else:
-        moving_fraction = (rotation > MOVING_DPS).mean()
+        resting = min(rest_s / seconds, 0.9) if seconds > 0 else 0.0
+        moving_fraction = (rotation > MOVING_DPS).mean() / (1 - resting)
         add("movement", "PASS" if moving_fraction >= MIN_MOVING_FRACTION else "FAIL",
             f"{moving_fraction:.0%} of the set over {MOVING_DPS:g} deg/s (want ≥{MIN_MOVING_FRACTION:.0%})")
         reps = row["actual_reps"]
         if pd.notna(reps) and reps > 0:
-            per_rep = seconds / reps
+            per_rep = (seconds - rest_s) / reps
             level = "FAIL" if per_rep < MIN_S_PER_REP else "WARN" if per_rep > MAX_S_PER_REP else "PASS"
             add("rep pace", level, f"{per_rep:.2f} s per rep for {int(reps)} reps")
     return checks
@@ -184,10 +199,10 @@ def check_frame(df: pd.DataFrame) -> list[Check]:
                   f"(want ≤{MAX_FRAME_DEG:g}; mirrored axes give ~90)")]
 
 
-def validate(df: pd.DataFrame, ann: pd.DataFrame) -> list[Check]:
+def validate(df: pd.DataFrame, ann: pd.DataFrame, rest_s: dict[int, float] | None = None) -> list[Check]:
     checks = check_timing(df) + check_frame(df)
     for _, row in ann[ann["status"] == "ok"].iterrows():
-        checks += check_set(slice_set(df, row), row)
+        checks += check_set(slice_set(df, row), row, (rest_s or {}).get(int(row["set_idx"]), 0.0))
     return checks
 
 
@@ -224,7 +239,7 @@ def plot_session(df: pd.DataFrame, ann: pd.DataFrame, checks: list[Check], path:
 def report(session: str, plot: bool = True) -> bool:
     """Print every check for one session; return True if nothing failed."""
     df, ann = load_session(session), load_annotations(session)
-    checks = validate(df, ann)
+    checks = validate(df, ann, scripted_rest_s(session))
     print(f"\nSession {session} · {len(df)} samples · {df['t'].iloc[-1]:.1f} s")
     for c in checks:
         print(f"  [{c.scope:<12}] {c.level:<4}  {c.name:<13} {c.detail}")

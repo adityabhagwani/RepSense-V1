@@ -3,10 +3,10 @@ import re
 import numpy as np
 import pytest
 
-from src.dataio import HALF_KINDS, movement_count, parse_marked
+from src.dataio import HALF_KINDS, REST_KINDS, REST_SECONDS, movement_count, parse_marked
 from src.make_script import (
     CURL_STYLES, DISTRACTORS, DRIFT_PER_SET, DRIFT_SETS, EXERCISES, LIFT_CONDITIONS, MAX_REPS,
-    MIN_REPS, NORMAL_SETS, PARTIAL_SETS, make_script, shares, write_script,
+    MIN_REPS, NORMAL_SETS, PARTIAL_SETS, REST_CHANCE, make_script, shares, write_script,
 )
 from src.record import load_script
 
@@ -61,7 +61,9 @@ def test_marks_follow_the_spec_and_stay_off_the_first_and_last_movement():
             # a lift after a half_lower starts halfway up: it can't be "only halfway" or "hold halfway"
             assert not any(k == "half_lower" and marks.get(m + 1) in ("half_lift", "pause")
                            for m, k in marks.items())
-            kinds = sorted(marks.values())
+            rests = [k for k in marks.values() if k in REST_KINDS]
+            assert len(rests) <= 1 and (not rests or r["exercise"] == "curl")
+            kinds = sorted(k for k in marks.values() if k not in REST_KINDS)
             extra = [k for k in kinds if k in HALF_KINDS]
             if r["condition"] == "partial":
                 assert kinds == ["half_lift", "half_lift", "half_lower", "half_lower"]
@@ -126,3 +128,18 @@ def test_alternating_sets_never_lower_halfway():
         for r in lift_sets(seed):
             if r["condition"] == "alternating":
                 assert "half_lower" not in parse_marked(r["marked"]).values()
+
+
+def test_a_rest_in_about_half_the_curl_sets_lengths_mixed_and_never_changing_the_count():
+    curl_sets = [r for seed in SEEDS for r in lift_sets(seed) if r["exercise"] == "curl"]
+    rests = [k for r in curl_sets for k in parse_marked(r["marked"]).values() if k in REST_KINDS]
+    assert abs(len(rests) / len(curl_sets) - REST_CHANCE) < 0.05  # a few drift sets have no room for one
+    assert {int(k[4:]) for k in rests} == set(REST_SECONDS)
+    for r in curl_sets:
+        marks = parse_marked(r["marked"])
+        for m, k in marks.items():
+            if k in REST_KINDS:
+                assert f"Lift {m}: after it, lower all the way and let the arm hang still for {k[4:]} s" in r["notes"]
+                assert marks.get(m) == k  # the rested lift carries no other mark: it is a plain full rep
+        halves = sum(k in HALF_KINDS for k in marks.values())
+        assert movement_count(r["reps"], marks) == r["reps"] + halves  # rests add no lift

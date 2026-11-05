@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from src.check_marks import TEACHER_COLUMNS, attach_teacher, expand_marks, summarize
-from src.dataio import movement_count, parse_marked
+from src.dataio import REST_KINDS, movement_count, parse_marked
 from src.make_script import DISTRACTORS, LIFT_CONDITIONS, make_script
 
 FULL = {"rom_deg": 110.0, "end_gap_deg": 0.0, "drift_deg": 3.0, "up_s": 1.0}
@@ -32,7 +32,7 @@ def recorded(seed=7):
         n = movement_count(r["reps"], marks) if r["condition"] != "exhaustion" else 15
         for m in range(1, n + 1):
             values = {c: 1.0 for c in TEACHER_COLUMNS} | FULL
-            if m in marks:
+            if marks.get(m) in SIGNATURE:  # a rest has no teacher signature: the rested rep is a plain full rep
                 col, value = SIGNATURE[marks[m]]
                 values[col] = value
             labels.append({"set_idx": i, "rep": m, **values})
@@ -70,7 +70,8 @@ def test_teacher_values_land_on_the_right_movement():
         assert (curl.loc[curl["kind"] != kind, col] == FULL[col]).all()
     assert joined.loc[joined["exercise"] != "curl", TEACHER_COLUMNS].isna().all().all()
     table = summarize(joined)
-    assert list(table.index) == ["full", "half_lift", "half_lower", "drift", "pause"]
+    assert list(table.index)[:5] == ["full", "half_lift", "half_lower", "drift", "pause"]
+    assert set(table.index[5:]) <= set(REST_KINDS)  # rests show up as their own kinds, after the others
     for kind, (col, value) in SIGNATURE.items():
         assert table.loc[kind, col] == value
 

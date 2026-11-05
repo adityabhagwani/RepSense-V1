@@ -30,9 +30,12 @@ ANNOTATION_COLUMNS = [
 
 # protocols/<session>.csv `marked` column: scripted movements as movement:kind, e.g.
 # "4:half_lift;9:half_lower". A movement is any lift in the set, half reps included, numbered
-# from 1. Unmarked = full. Half reps don't count toward `reps`; drift and pause reps do.
+# from 1. Unmarked = full. Half reps don't count toward `reps`; drift and pause reps do. restN = a
+# full rep, then the arm hangs still for N s before the next lift (it changes no count).
 HALF_KINDS = ("half_lift", "half_lower")
-MARK_KINDS = (*HALF_KINDS, "drift", "pause")
+REST_SECONDS = (5, 10, 15)  # below, near and above the 12 s min-reps gap
+REST_KINDS = tuple(f"rest{s}" for s in REST_SECONDS)
+MARK_KINDS = (*HALF_KINDS, "drift", "pause", *REST_KINDS)
 
 
 def format_marked(marks: dict[int, str]) -> str:
