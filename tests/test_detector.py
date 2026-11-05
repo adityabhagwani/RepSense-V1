@@ -3,9 +3,11 @@ half reps, a pause, and "wiggles" (small, jittery, irregular arm movement like w
 
 import numpy as np
 import pandas as pd
+import pytest
 from scipy.spatial.transform import Rotation
 
 import src.detector as detector
+from src.counter import lift_span
 from src.detector import (FEATURES, MIN_REPS_GAP_S, combined_count, count_with, hump_features, label_humps,
                           min_reps, train)
 from test_counter import FS, FULL, HALF, elevation
@@ -163,3 +165,22 @@ def test_min_reps_keeps_reps_exactly_the_gap_apart_and_drops_just_beyond():
 def test_min_reps_keeps_a_slow_set_whole():
     slow = [0.0, 9.7, 19.4, 29.1]  # the longest lift-to-lift time seen in a real set
     assert min_reps(slow).tolist() == slow
+
+
+def test_lift_span_starts_where_the_lift_leaves_its_dip_not_at_the_dip():
+    angle = np.r_[np.zeros(100), np.linspace(0, 100, 51)[1:], np.linspace(100, 0, 51)[1:], np.zeros(100)]
+    assert lift_span(angle, 40, 149, 260) == (104, 194)  # within 10 deg of the dips: 5 samples into the rise, 45 into the fall
+
+
+def test_a_rest_before_a_rep_no_longer_changes_its_measured_lift():
+    """Spliced sets (PLAN.md 11-04): v1 measured a rep from the lowest point since the last hump, so a
+    10 s rest before it read as a 10 s rise and the veto removed a real rep. v2 measures the lift."""
+    def rep_after(rest_s, span):
+        angle = np.r_[elevation([FULL, FULL]), np.zeros(int(rest_s * FS)), elevation([FULL, FULL])]
+        return hump_features(sensors(angle, mount_seed=5, seed=1), span=span).iloc[2]
+    v1_short, v1_long = rep_after(0.2, "dip"), rep_after(10.0, "dip")
+    v2_short, v2_long = rep_after(0.2, "lift"), rep_after(10.0, "lift")
+    assert v1_long["rise_s"] - v1_short["rise_s"] > 5          # the flaw, as frozen in detector-v1
+    for f, tol in [("rise_s", 0.1), ("fall_s", 0.1), ("twist_deg", 3), ("jitter_dps", 1), ("one_axis_share", 0.02)]:
+        assert abs(v2_long[f] - v2_short[f]) < tol, f
+    assert v2_long["start_deg"] == pytest.approx(v1_long["start_deg"])  # dips themselves are unchanged

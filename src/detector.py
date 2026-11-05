@@ -7,12 +7,19 @@ movement (walking, re-racking, adjusting) both count as "not". Count = humps wit
 Every feature is wrist-only and measured from the hanging direction or as a magnitude, so how
 the band sits doesn't change it (FEATURES.md rules).
 
+detector-v2 (11-04) is the same 12 features over a different span: v1 measures each hump from the
+lowest point since the previous hump, so a rest or movement between reps is folded into the next
+rep (its rise time and twist balloon and the veto removes a real rep; spliced sets, PLAN.md 11-04).
+v2 measures over the lift itself (counter.lift_span, the 10% rule the set finder uses). The dips'
+angles stay as they are: a half-lower is the dip that stays high.
+
 Labels come from the scripts: in a scripted set whose hump count matches its scripted lifts,
 hump n gets lift n's mark (half_lift / half_lower -> not a full rep, everything else -> full);
 every hump in a distractor set is "not a rep". Sets whose counts don't match, and exhaustion
 sets (no script), are skipped for training rather than guessed.
 
-    python -m src.detector dev1 dev1b dev2b    # leave-one-session-out check, then train and save
+    python -m src.detector dev1 dev1b dev2b               # leave-one-session-out check, then train and save v1
+    python -m src.detector dev1 dev1b dev2b --span lift   # the same for v2 (its own model file)
 """
 
 import argparse
@@ -27,7 +34,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.counter import ANGLE_FLOOR_DEG, MIN_SPACING_S, SMOOTH_HZ, count_set
+from src.counter import ANGLE_FLOOR_DEG, MIN_SPACING_S, SMOOTH_HZ, count_set, lift_span
 from src.dataio import (ACCEL, GYRO, HALF_KINDS, load_annotations, load_session, movement_count,
                         parse_marked, slice_set, with_true_reps)
 from src.labels import USB_AXIS_FILE, segment_angle, settle, track_down
@@ -35,7 +42,8 @@ from src.make_script import PROTOCOLS_DIR
 from src.sync import lowpass
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
-MODEL_PATH = MODELS_DIR / "detector.joblib"
+MODEL_PATH = MODELS_DIR / "detector.joblib"            # detector-v1: humps measured dip to dip
+MODEL_PATHS = {"dip": MODEL_PATH, "lift": MODELS_DIR / "detector_v2.joblib"}  # by span; "lift" = detector-v2
 GATE = 0.05      # combined: a rule-counted hump must look at least this likely to be a full rep to the
                  # learned model; set before seeing combined results, not tuned
 MATCH_S = 0.6    # a rule hump and a learned hump this close in time are the same hump
@@ -58,8 +66,9 @@ FEATURES = [
 ]
 
 
-def hump_features(seg: pd.DataFrame, usb_axis=None) -> pd.DataFrame:
-    """One row per candidate hump in a set: the features above plus t_top (s from set start)."""
+def hump_features(seg: pd.DataFrame, usb_axis=None, span: str = "dip") -> pd.DataFrame:
+    """One row per candidate hump in a set: the features above plus t_top (s from set start).
+    span="dip" (v1): timing and motion over dip to dip. span="lift" (v2): over the lift itself."""
     t, gyro, accel = seg["t"].to_numpy(), seg[GYRO].to_numpy(), seg[ACCEL].to_numpy()
     fs = 1 / np.median(np.diff(t))
     down = track_down(t, gyro, accel)
@@ -81,19 +90,20 @@ def hump_features(seg: pd.DataFrame, usb_axis=None) -> pd.DataFrame:
     rows = []
     for k, top in enumerate(peaks):
         a, b = dips[k], dips[k + 1]
-        span = slice(a, b + 1)
-        dt = np.diff(t[span], prepend=t[a])
-        sv = np.linalg.svd(gyro[span], full_matrices=False)[1]
+        s0, s1 = lift_span(angle, a, top, b) if span == "lift" else (a, b)
+        part = slice(s0, s1 + 1)
+        dt = np.diff(t[part], prepend=t[s0])
+        sv = np.linalg.svd(gyro[part], full_matrices=False)[1]
         neighbors = [g for g in (gaps[k - 1] if k > 0 else None, gaps[k] if k < len(gaps) else None) if g is not None]
         rows.append({
             "height_deg": props["prominences"][k],
             "top_deg": angle[top], "start_deg": angle[a], "end_deg": angle[b],
-            "rise_s": t[top] - t[a], "fall_s": t[b] - t[top],
-            "jitter_dps": float(np.sqrt(np.mean(shake[span] ** 2))),
-            "twist_deg": float(np.ptp(np.cumsum((gyro[span] @ axis) * dt))),
+            "rise_s": t[top] - t[s0], "fall_s": t[s1] - t[top],
+            "jitter_dps": float(np.sqrt(np.mean(shake[part] ** 2))),
+            "twist_deg": float(np.ptp(np.cumsum((gyro[part] @ axis) * dt))),
             "one_axis_share": float(sv[0] ** 2 / (sv ** 2).sum()),
             "rhythm_off": float(np.mean([abs(g - usual_gap) / usual_gap for g in neighbors])) if neighbors else 0.0,
-            "peak_speed_dps": float(speed[span].max()),
+            "peak_speed_dps": float(speed[part].max()),
             "t_top": t[top] - t0,
         })
     df = pd.DataFrame(rows)
@@ -113,7 +123,7 @@ def label_humps(n_humps: int, condition: str, reps, marked: str) -> np.ndarray |
     return np.array([0 if marks.get(m) in HALF_KINDS else 1 for m in range(1, n_humps + 1)])
 
 
-def build_dataset(sessions: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_dataset(sessions: list[str], span: str = "dip") -> tuple[pd.DataFrame, pd.DataFrame]:
     """(humps, sets): every candidate hump of every curl and distractor set, and one row per set."""
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"] if USB_AXIS_FILE.exists() else None
     humps, sets = [], []
@@ -125,7 +135,7 @@ def build_dataset(sessions: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
             if a["exercise"] != "curl" and a["condition"] != "distractor":
                 continue
             seg = slice_set(raw, a)
-            f = hump_features(seg, usb_axis)
+            f = hump_features(seg, usb_axis, span)
             row = script.iloc[int(a["set_idx"]) - 1]
             labels = label_humps(len(f), a["condition"], row["reps"], row["marked"])
             f["label"] = labels if labels is not None else np.nan
@@ -218,13 +228,21 @@ def main():
     parser.add_argument("--evaluate", action="store_true",
                         help="count these sessions with the frozen rule, learned, combined and min-reps versions "
                              "(no training)")
+    parser.add_argument("--span", choices=["dip", "lift"], default="dip",
+                        help="dip = detector-v1 (frozen), lift = detector-v2; each has its own model file")
+    parser.add_argument("--overwrite-v1", action="store_true",
+                        help="training with --span dip replaces the frozen detector-v1 model; refused without this")
     args = parser.parse_args()
+    model_path = MODEL_PATHS[args.span]
     cols = ["session", "set_idx", "condition", "true_reps", "rule_count", "learned_count", "combined_count",
             "min_reps_count"]
 
-    humps, sets = build_dataset(args.sessions)
+    if not args.evaluate and args.span == "dip" and MODEL_PATH.exists() and not args.overwrite_v1:
+        parser.error("this would retrain and overwrite the frozen detector-v1 model; add --evaluate, "
+                     "--span lift, or --overwrite-v1")
+    humps, sets = build_dataset(args.sessions, args.span)
     if args.evaluate:
-        model = joblib.load(MODEL_PATH)
+        model = joblib.load(model_path)
         p = pd.Series(model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else [], index=humps.index)
         result = add_counts(sets, humps, p)
         print(result[cols].to_string(index=False))
@@ -244,9 +262,9 @@ def main():
 
     model = train(humps)
     MODELS_DIR.mkdir(exist_ok=True)
-    joblib.dump(model, MODEL_PATH)
+    joblib.dump(model, model_path)
     weights = pd.Series(model[-1].coef_[0], index=FEATURES).sort_values(key=abs, ascending=False)
-    print(f"saved {MODEL_PATH.relative_to(MODELS_DIR.parent)}; weights (+ pushes toward 'full rep'):")
+    print(f"saved {model_path.relative_to(MODELS_DIR.parent)}; weights (+ pushes toward 'full rep'):")
     print(weights.round(2).to_string())
 
 

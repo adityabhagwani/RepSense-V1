@@ -37,6 +37,19 @@ HUMP_SHARE = 0.825       # a hump counts if at least this share of the set's typ
                          # 0.45-0.79, full reps 0.95+
 
 
+EDGE_SHARE = 0.1        # a lift starts where it has risen this share of the way up from its dip, and ends
+                        # where it is back within this share of the next dip. The dip itself is just the
+                        # lowest point since the last lift, which after a rest can be seconds earlier
+
+
+def lift_span(angle: np.ndarray, dip_before: int, top: int, dip_after: int, share: float = EDGE_SHARE) -> tuple[int, int]:
+    """(start, end) sample of the lift that peaks at `top`: the last sample before it still within
+    `share` of the way up from dip_before, and the first after it back within `share` of dip_after."""
+    rise = angle[dip_before:top + 1] <= angle[dip_before] + share * (angle[top] - angle[dip_before])
+    fall = angle[top:dip_after + 1] <= angle[dip_after] + share * (angle[top] - angle[dip_after])
+    return dip_before + int(np.nonzero(rise)[0][-1]), top + int(np.nonzero(fall)[0][0])
+
+
 @dataclass
 class Count:
     n: int                   # reps counted
