@@ -54,3 +54,25 @@ def test_lost_samples_and_a_clipped_gyro_show_in_signal_quality():
 def test_risk_coverage_keeps_the_lowest_risk_sets_first():
     rc = risk_coverage(np.array([0, 0, 1, 1]), np.array([0.1, 0.2, 0.9, 0.8]))
     assert rc["error"].tolist() == [0.0, 0.0, 0.5 * 2 / 3, 0.5]
+
+
+def test_ranking_credits_a_planted_sign_and_not_noise():
+    """One feature decides the error, the rest are noise. Adjusted credit lets only that one beat
+    shuffled-label luck; raw credit (mean with - without) also lets noise through that shared subsets
+    with it, which is why the ranking uses adjusted credit."""
+    from src.error_model import credits, subset_scores
+    rng = np.random.default_rng(0)
+    n, k = 600, 10
+    X = rng.normal(size=(n, k))
+    y = (X[:, 3] + 0.5 * rng.normal(size=n) > 1).astype(int)
+    groups = np.repeat(["a", "b", "c"], n // 3)
+    subsets = [rng.choice(k, 4, replace=False) for _ in range(40)]
+    member = np.zeros((40, k), bool)
+    for i, cols in enumerate(subsets):
+        member[i, cols] = True
+    raw, adj = credits(subset_scores(X, y, groups, subsets), member)
+    luck = [credits(subset_scores(X, rng.permutation(y), groups, subsets), member) for _ in range(20)]
+    beats_adj = adj > np.percentile([l[1] for l in luck], 95, axis=0)
+    beats_raw = raw > np.percentile([l[0] for l in luck], 95, axis=0)
+    assert np.flatnonzero(beats_adj).tolist() == [3]
+    assert beats_raw[3] and beats_raw.sum() > 1  # the leak adjusted credit removes

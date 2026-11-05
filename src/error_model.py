@@ -43,6 +43,18 @@ SYMPTOMS = {  # FEATURES.md number: name. Every one is computed from the wrist a
 CORE = [SYMPTOMS[k] for k in (1, 4, 7, 10, 12, 25)]  # the confirmatory set (FEATURES.md ★)
 CUT_WIGGLE = 0.15  # #10: how far the rule's cut moves either way
 REAL_SESSIONS = {"p1": ["dev1", "dev1b", "dev2b"], "p2": ["p2_s1"], "p3": ["p3_s1"], "p4": ["p4_s1"], "p5": ["p5_s1"]}
+PLAIN = {  # what each warning sign means, for the printout
+    "rhythm_irregularity": "uneven spacing between reps", "longest_gap_ratio": "longest gap vs a typical gap",
+    "shortest_gap_ratio": "shortest gap vs a typical gap", "weakest_peak_ratio": "smallest rep vs a typical rep",
+    "peak_height_spread": "how much rep sizes vary", "close_calls": "bumps that nearly passed or failed the height rule",
+    "rhythm_strength": "how regular the up-down pattern is", "period_vs_count": "set length / rep time, vs the count",
+    "threshold_stability": "count changes if the height rule moves 15%", "motion_outside_reps": "movement that isn't a rep",
+    "seconds_per_rep": "seconds per counted rep", "signal_quality": "lost or maxed-out sensor readings",
+    "rule_minus_combined": "bumps the checker threw out", "learned_close_calls": "bumps the checker was unsure about",
+    "counter_disagreement": "how much the three counters disagree",
+}
+# Random-subset ranking (FEATURES.md selection protocol, exploratory), run nested
+SUBSET_SIZE, N_SUBSETS, N_SHUFFLES, N_BOOT, KEEP_SHARE = 8, 100, 20, 20, 0.7
 
 
 def ratio(a, b):
@@ -172,6 +184,103 @@ def risk_coverage(y: np.ndarray, risk: np.ndarray) -> pd.DataFrame:
     return pd.DataFrame({"coverage": kept / len(y), "error": np.cumsum(y[order]) / kept})
 
 
+def subset_scores(X: np.ndarray, y: np.ndarray, groups: np.ndarray, subsets: list) -> np.ndarray:
+    """For each feature subset: how well a logistic model on it ranks wrong sets above right ones (AUC),
+    held out by group (source session)."""
+    scores = []
+    for cols in subsets:
+        risk = np.empty(len(y))
+        for g in np.unique(groups):
+            out = groups == g
+            risk[out] = LogisticRegression(max_iter=1000).fit(X[~out][:, cols], y[~out]).decision_function(X[out][:, cols])
+        scores.append(roc_auc_score(y, risk) if 0 < y.sum() < len(y) else np.nan)
+    return np.array(scores)
+
+
+def credits(scores: np.ndarray, member: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(raw, adjusted) credit per feature from the subsets' scores. raw = mean score of the subsets that
+    include it minus those that don't (the protocol as first written). adjusted = its weight in a fit of
+    score on membership, so a feature doesn't borrow credit from a strong one it happened to share
+    subsets with: in a planted test raw credit let 1-3 noise features beat luck in 3 of 3 seeds,
+    adjusted credit none (FEATURES.md change log, 11-04)."""
+    raw = np.array([np.nanmean(scores[member[:, f]]) - np.nanmean(scores[~member[:, f]]) for f in range(member.shape[1])])
+    ok = ~np.isnan(scores)
+    beta = np.linalg.lstsq(member[ok].astype(float), scores[ok], rcond=None)[0]  # every subset is the same size: no intercept
+    return raw, beta - beta.mean()
+
+
+def rank_fold(sp: pd.DataFrame, held: str, features: list[str], seed: int) -> dict:
+    """Steps 1-6 of the protocol with one source session held out: only the other sessions are used to
+    rank features, and the kept features are scored on the held-out session once."""
+    rng = np.random.default_rng([seed, LIBRARY.index(held)])
+    train, test = sp[sp["source"] != held], sp[sp["source"] == held]
+    imp = SimpleImputer(strategy="median").fit(train[features])
+    sc = StandardScaler().fit(imp.transform(train[features]))
+    X, Xt = sc.transform(imp.transform(train[features])), sc.transform(imp.transform(test[features]))
+    y, yt = (train["shipped"] != train["truth"]).to_numpy(int), (test["shipped"] != test["truth"]).to_numpy(int)
+    groups = train["source"].to_numpy()
+    subsets = [rng.choice(len(features), SUBSET_SIZE, replace=False) for _ in range(N_SUBSETS)]
+    member = np.zeros((N_SUBSETS, len(features)), bool)
+    for i, cols in enumerate(subsets):
+        member[i, cols] = True
+    raw, adj = credits(subset_scores(X, y, groups, subsets), member)
+    luck = [credits(subset_scores(X, rng.permutation(y), groups, subsets), member) for _ in range(N_SHUFFLES)]
+    bar_raw, bar_adj = (np.percentile([l[i] for l in luck], 95, axis=0) for i in (0, 1))
+    beats_raw, beats_adj = [], []
+    for _ in range(N_BOOT):
+        b = rng.integers(len(y), size=len(y))
+        r, a = credits(subset_scores(X[b], y[b], groups[b], subsets), member)
+        beats_raw.append(r > bar_raw)
+        beats_adj.append(a > bar_adj)
+    share_raw, share = np.mean(beats_raw, axis=0), np.mean(beats_adj, axis=0)
+    kept = [f for f, s in zip(features, share) if s >= KEEP_SHARE]
+    kept_raw = [f for f, s in zip(features, share_raw) if s >= KEEP_SHARE]
+    cols = [features.index(f) for f in kept]
+    risk = LogisticRegression(max_iter=1000).fit(X[:, cols], y).decision_function(Xt[:, cols]) if cols else np.zeros(len(yt))
+    return {"held": held, "credit": adj, "luck_bar": bar_adj, "share": share, "kept": kept, "kept_raw": kept_raw,
+            "test_index": test.index.to_numpy(), "test_risk": risk}
+
+
+def rank_features(sp: pd.DataFrame, real: pd.DataFrame, seed: int) -> None:
+    from joblib import Parallel, delayed
+    features = list(SYMPTOMS.values())
+    folds = Parallel(n_jobs=len(LIBRARY))(delayed(rank_fold)(sp, s, features, seed) for s in LIBRARY)
+    table = pd.DataFrame({
+        "warning sign": [PLAIN[f] for f in features],
+        "kept in (of 5)": [sum(f in r["kept"] for r in folds) for f in features],
+        "kept, raw credit": [sum(f in r["kept_raw"] for r in folds) for f in features],
+        "credit": np.mean([r["credit"] for r in folds], axis=0),
+        "luck bar": np.mean([r["luck_bar"] for r in folds], axis=0),
+        "survived repeats": np.mean([r["share"] for r in folds], axis=0),
+    }, index=features).sort_values("credit", ascending=False)
+    print("Each warning sign: credit = how much it adds to an 8-sign predictor's score, after accounting for the\n"
+          "other signs it was grouped with;\n"
+          "luck bar = the credit it got 95% of the time with right/wrong shuffled; kept = beat luck in >=70% of repeats")
+    print(table.round(3).to_string(index=False))
+    for r in folds:
+        print(f"  held out {r['held']}: kept {', '.join(r['kept']) or 'nothing'}")
+
+    y = (sp["shipped"] != sp["truth"]).to_numpy(int)
+    risk = np.empty(len(sp))
+    for r in folds:
+        risk[sp.index.get_indexer(r["test_index"])] = r["test_risk"]
+    core = out_of_fold(sp, CORE, sp["source"])
+    rng = np.random.default_rng(seed)
+    for name, r_ in [("kept signs (nested)", risk), ("core 6 (the main result)", core)]:
+        a, lo, hi = auc_interval(y, r_, rng)
+        rc = risk_coverage(y, r_)
+        print(f"{name:26s} spliced: ranks a wrong set above a right one {a:.0%} of the time ({lo:.0%}-{hi:.0%}); "
+              f"hiding the least confident 20% leaves {rc.loc[rc.coverage.sub(0.8).abs().idxmin(), 'error']:.1%} wrong")
+    consensus = [f for f in features if sum(f in r["kept"] for r in folds) >= 3]
+    real_group = real["session"].where(real["session"].isin(LIBRARY), "none")
+    y_re = (real["shipped"] != real["truth"]).to_numpy(int)
+    r_re = out_of_fold(sp, consensus, sp["source"], real, real_group)
+    a, lo, hi = auc_interval(y_re, r_re, rng)
+    ranks = pd.Series(r_re).rank(ascending=False).astype(int)[y_re == 1].tolist()
+    print(f"signs kept in 3+ of 5 folds: {', '.join(consensus)}\n"
+          f"real sets (52, 5 wrong), predictor on those signs: {a:.0%} ({lo:.0%}-{hi:.0%}); the 5 wrong sets rank {sorted(ranks)}")
+
+
 def plot_error_model(curves: dict, path) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -207,6 +316,7 @@ def main():
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--sets", type=int, default=3000)
     parser.add_argument("--recompute", action="store_true", help="recompute symptoms instead of reading the cache")
+    parser.add_argument("--rank", action="store_true", help="the random-subset ranking of all 15 warning signs (exploratory)")
     args = parser.parse_args()
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
     sp_path = REPORTS_DIR / f"error_rows_spliced_{args.seed}_{args.detector}.csv"
@@ -216,6 +326,9 @@ def main():
     if args.recompute or not re_path.exists():
         real_rows(usb_axis, args.detector).to_csv(re_path, index=False)
     sp, real = pd.read_csv(sp_path), pd.read_csv(re_path)
+    if args.rank:
+        rank_features(sp, real, args.seed)
+        return
     rng = np.random.default_rng(args.seed)
     y_sp = (sp["shipped"] != sp["truth"]).to_numpy(int)
     y_re = (real["shipped"] != real["truth"]).to_numpy(int)
