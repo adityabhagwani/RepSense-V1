@@ -21,12 +21,15 @@ held-out results would make the main result meaningless, so changes go in the lo
 | 6 | Close calls | Share of candidate peaks within ±20% of the threshold | Counts decided by a hair |
 | 7 ★ | Rhythm strength | Autocorrelation at the rep period (0–1) | No clear rhythm |
 | 8 | Period vs count | Duration ÷ period, compared with the count | Counter and rhythm disagree |
-| 9 ★ | Accel vs gyro disagreement | Difference between the two counters | Ambiguous sets |
+| 9 | Accel vs gyro disagreement | Difference between the two counters | Ambiguous sets (replaced by #25 in the core set, 11-04: the angle-vs-gyro counters are no longer used) |
 | 10 ★ | Threshold stability | Does the count change at threshold ±15%? | Fragile counts |
 | 11 | Motion outside reps | Share of the set's movement outside detected reps | Re-racking, adjusting, walking |
 | 12 ★ | Seconds per rep | Duration ÷ count | Impossible pace |
 | 13 | Signal quality | Lost and late samples, % clipped | Bad data, not bad counting |
-| 14 | Exercise type | Curl, raise or press | Exercise difficulty |
+| 14 | Exercise type | Curl, raise or press | Exercise difficulty (dropped 11-04: curls only) |
+| 25 ★ | Rule − combined gap | Rule-counted humps the learned veto removed | Ambiguous sets, wiggles, interruptions |
+| 26 | Learned close calls | Share of the set's humps the learned model scores 0.2–0.8 | Humps it can't decide |
+| 27 | Disagreement with the other counters | Mean of \|shipped − rule\| and \|shipped − learned\| counts | Counters split |
 
 ## Form model: one prediction per rep, targets from the two-sensor teacher (range in degrees, partial yes/no, drift in degrees)
 | # | Feature | Computation | Catches |
@@ -76,3 +79,4 @@ Correlated features (e.g. #1 and #2) split credit, so one of a pair being droppe
 |---|---|---|
 | 2026-10-26 | Created | |
 | 2026-10-28 | Rule 2 amended (fixed along-forearm direction); feature #24; teacher-label wrist-clue table | Two-home label maker; fixed USB-along-forearm mounting |
+| 2026-11-04 | #25–27 added; #25 replaces #9 in the core set (★ now #1, #4, #7, #10, #12, #25); #14 dropped. First count-model run fixed here, **before any symptom is computed**: target = the candidate stack (`min-reps-v1` with `detector-v4` inside) gets the count wrong. Training rows = 3,000 spliced sets (screen seed 1, true count known by construction), scored leave-one-source-session-out. Real check = every real curl set (Enter presses) of p1–p5 with a settled count, flagged ones included, unresolved left out; each session's sets predicted by a model trained only on spliced sets not built from that session. Main = ★ core set, L2 logistic, one run. Baselines = each ★ feature alone. Outputs: AUC (bootstrap 95% interval) and risk–coverage. Exact computations: #7 = autocorrelation of the forearm angle at the median rep gap; #10 = largest change in the rule's count when its cut moves ±15%; #13 = share of samples lost plus share at the gyro's saturated ceiling | Splicing gives thousands of count errors with known causes; real sets have only ~5. Set errors (is it a set?) get their own model later |
