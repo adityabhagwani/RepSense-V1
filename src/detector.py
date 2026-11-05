@@ -11,15 +11,21 @@ detector-v2 (11-04) is the same 12 features over a different span: v1 measures e
 lowest point since the previous hump, so a rest or movement between reps is folded into the next
 rep (its rise time and twist balloon and the veto removes a real rep; spliced sets, PLAN.md 11-04).
 v2 measures over the lift itself (counter.lift_span, the 10% rule the set finder uses). The dips'
-angles stay as they are: a half-lower is the dip that stays high.
+angles stay as they are: a half-lower is the dip that stays high. detector-v3 (11-04) also makes
+rhythm_off one-sided: only a gap shorter than the set's usual counts against a hump (a twitch comes
+too soon); a rest before a rep is no evidence against it. With v2, the reps either side of a 10 s
+rest still sat 2-4x the usual gap from a neighbour and were vetoed. Two comparisons: v4 drops the
+rhythm feature (held at 0, so the model can't use it); v5 is v3 made causal, using only the gap to the
+previous hump against the earlier gaps, as a live band would know it (the other features still
+look ahead).
 
 Labels come from the scripts: in a scripted set whose hump count matches its scripted lifts,
 hump n gets lift n's mark (half_lift / half_lower -> not a full rep, everything else -> full);
 every hump in a distractor set is "not a rep". Sets whose counts don't match, and exhaustion
 sets (no script), are skipped for training rather than guessed.
 
-    python -m src.detector dev1 dev1b dev2b               # leave-one-session-out check, then train and save v1
-    python -m src.detector dev1 dev1b dev2b --span lift   # the same for v2 (its own model file)
+    python -m src.detector dev1 dev1b dev2b --detector v3   # leave-one-session-out check, then train and save
+    python -m src.detector p2_s1 p4_s1 --evaluate --detector v1
 """
 
 import argparse
@@ -42,8 +48,14 @@ from src.make_script import PROTOCOLS_DIR
 from src.sync import lowpass
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
-MODEL_PATH = MODELS_DIR / "detector.joblib"            # detector-v1: humps measured dip to dip
-MODEL_PATHS = {"dip": MODEL_PATH, "lift": MODELS_DIR / "detector_v2.joblib"}  # by span; "lift" = detector-v2
+MODEL_PATH = MODELS_DIR / "detector.joblib"  # detector-v1 (frozen)
+VERSIONS = {  # how each detector version measures a hump; each has its own model file
+    "v1": {"span": "dip", "rhythm": "both", "path": MODEL_PATH},
+    "v2": {"span": "lift", "rhythm": "both", "path": MODELS_DIR / "detector_v2.joblib"},
+    "v3": {"span": "lift", "rhythm": "short", "path": MODELS_DIR / "detector_v3.joblib"},
+    "v4": {"span": "lift", "rhythm": "none", "path": MODELS_DIR / "detector_v4.joblib"},
+    "v5": {"span": "lift", "rhythm": "past", "path": MODELS_DIR / "detector_v5.joblib"},
+}
 GATE = 0.05      # combined: a rule-counted hump must look at least this likely to be a full rep to the
                  # learned model; set before seeing combined results, not tuned
 MATCH_S = 0.6    # a rule hump and a learned hump this close in time are the same hump
@@ -61,14 +73,16 @@ FEATURES = [
     "jitter_dps",      # shake riding on the hump: rotation speed minus its smoothed version
     "twist_deg",       # rotation around the forearm during the hump
     "one_axis_share",  # share of the hump's rotation about a single axis (a curl is a hinge)
-    "rhythm_off",      # how far the gaps to the neighboring humps are from the set's usual gap
+    "rhythm_off",      # how far the gaps to the neighboring humps are from the set's usual gap (v3: only
+                       # gaps shorter than usual count)
     "peak_speed_dps",
 ]
 
 
-def hump_features(seg: pd.DataFrame, usb_axis=None, span: str = "dip") -> pd.DataFrame:
-    """One row per candidate hump in a set: the features above plus t_top (s from set start).
-    span="dip" (v1): timing and motion over dip to dip. span="lift" (v2): over the lift itself."""
+def hump_features(seg: pd.DataFrame, usb_axis=None, version: str = "v1") -> pd.DataFrame:
+    """One row per candidate hump in a set: the features above plus t_top (s from set start), measured
+    the way `version` does (VERSIONS): timing and motion dip to dip (v1) or over the lift itself."""
+    span, rhythm = VERSIONS[version]["span"], VERSIONS[version]["rhythm"]
     t, gyro, accel = seg["t"].to_numpy(), seg[GYRO].to_numpy(), seg[ACCEL].to_numpy()
     fs = 1 / np.median(np.diff(t))
     down = track_down(t, gyro, accel)
@@ -102,13 +116,28 @@ def hump_features(seg: pd.DataFrame, usb_axis=None, span: str = "dip") -> pd.Dat
             "jitter_dps": float(np.sqrt(np.mean(shake[part] ** 2))),
             "twist_deg": float(np.ptp(np.cumsum((gyro[part] @ axis) * dt))),
             "one_axis_share": float(sv[0] ** 2 / (sv ** 2).sum()),
-            "rhythm_off": float(np.mean([abs(g - usual_gap) / usual_gap for g in neighbors])) if neighbors else 0.0,
+            "rhythm_off": rhythm_off(gaps, k, usual_gap, neighbors, rhythm),
             "peak_speed_dps": float(speed[part].max()),
             "t_top": t[top] - t0,
         })
     df = pd.DataFrame(rows)
     df["height_share"] = df["height_deg"] / df["height_deg"].median()
     return df[FEATURES + ["t_top"]]
+
+
+def rhythm_off(gaps: np.ndarray, k: int, usual_gap: float, neighbors: list, rhythm: str) -> float:
+    """How far hump k's spacing is from the set's usual. both: either neighbour's gap, either way (v1, v2).
+    short: only gaps shorter than usual (v3). past: only the gap to the previous hump, shorter than the
+    earlier gaps' median (v5). none: always 0 (v4)."""
+    if rhythm == "none" or not neighbors:
+        return 0.0
+    if rhythm == "past":
+        if k < 2:
+            return 0.0  # no earlier gap to compare with yet
+        before = np.median(gaps[:k - 1])
+        return float(max(before - gaps[k - 1], 0) / before)
+    off = [(max(usual_gap - g, 0) if rhythm == "short" else abs(g - usual_gap)) / usual_gap for g in neighbors]
+    return float(np.mean(off))
 
 
 def label_humps(n_humps: int, condition: str, reps, marked: str) -> np.ndarray | None:
@@ -123,7 +152,7 @@ def label_humps(n_humps: int, condition: str, reps, marked: str) -> np.ndarray |
     return np.array([0 if marks.get(m) in HALF_KINDS else 1 for m in range(1, n_humps + 1)])
 
 
-def build_dataset(sessions: list[str], span: str = "dip") -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_dataset(sessions: list[str], version: str = "v1") -> tuple[pd.DataFrame, pd.DataFrame]:
     """(humps, sets): every candidate hump of every curl and distractor set, and one row per set."""
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"] if USB_AXIS_FILE.exists() else None
     humps, sets = [], []
@@ -135,7 +164,7 @@ def build_dataset(sessions: list[str], span: str = "dip") -> tuple[pd.DataFrame,
             if a["exercise"] != "curl" and a["condition"] != "distractor":
                 continue
             seg = slice_set(raw, a)
-            f = hump_features(seg, usb_axis, span)
+            f = hump_features(seg, usb_axis, version)
             row = script.iloc[int(a["set_idx"]) - 1]
             labels = label_humps(len(f), a["condition"], row["reps"], row["marked"])
             f["label"] = labels if labels is not None else np.nan
@@ -228,19 +257,19 @@ def main():
     parser.add_argument("--evaluate", action="store_true",
                         help="count these sessions with the frozen rule, learned, combined and min-reps versions "
                              "(no training)")
-    parser.add_argument("--span", choices=["dip", "lift"], default="dip",
-                        help="dip = detector-v1 (frozen), lift = detector-v2; each has its own model file")
+    parser.add_argument("--detector", choices=list(VERSIONS), default="v1",
+                        help="which detector version (VERSIONS); each has its own model file")
     parser.add_argument("--overwrite-v1", action="store_true",
-                        help="training with --span dip replaces the frozen detector-v1 model; refused without this")
+                        help="training with --detector v1 replaces the frozen detector-v1 model; refused without this")
     args = parser.parse_args()
-    model_path = MODEL_PATHS[args.span]
+    model_path = VERSIONS[args.detector]["path"]
     cols = ["session", "set_idx", "condition", "true_reps", "rule_count", "learned_count", "combined_count",
             "min_reps_count"]
 
-    if not args.evaluate and args.span == "dip" and MODEL_PATH.exists() and not args.overwrite_v1:
+    if not args.evaluate and args.detector == "v1" and MODEL_PATH.exists() and not args.overwrite_v1:
         parser.error("this would retrain and overwrite the frozen detector-v1 model; add --evaluate, "
-                     "--span lift, or --overwrite-v1")
-    humps, sets = build_dataset(args.sessions, args.span)
+                     "--detector v2/v3, or --overwrite-v1")
+    humps, sets = build_dataset(args.sessions, args.detector)
     if args.evaluate:
         model = joblib.load(model_path)
         p = pd.Series(model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else [], index=humps.index)

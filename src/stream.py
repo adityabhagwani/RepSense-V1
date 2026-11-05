@@ -28,7 +28,7 @@ from scipy.signal import find_peaks
 
 from src.counter import MIN_SPACING_S, SMOOTH_HZ, count_set, lift_span
 from src.dataio import ACCEL, DATA_DIR, GYRO, load_annotations, load_session, slice_set, with_true_reps
-from src.detector import (FEATURES, MODEL_PATHS, add_counts, build_dataset, combined_times, hump_features,
+from src.detector import (FEATURES, VERSIONS, add_counts, build_dataset, combined_times, hump_features,
                           min_reps, train)
 from src.labels import USB_AXIS_FILE, segment_angle, track_down
 from src.sync import REPORTS_DIR, lowpass
@@ -104,20 +104,20 @@ def draw_boxes(lifts: list[Lift]) -> list[Box]:
     return boxes
 
 
-def model_for(session: str, span: str = "dip"):
-    """The saved learned model (span "dip" = detector-v1, "lift" = detector-v2), except on its own
-    training sessions: there, one trained on the other dev sessions, so dev numbers have the learned
-    part held out (as in the dev scores)."""
+def model_for(session: str, version: str = "v1"):
+    """The saved learned model of a detector version, except on its own training sessions: there, one
+    trained on the other dev sessions, so dev numbers have the learned part held out (as in the dev
+    scores)."""
     if session in DEV_SESSIONS:
-        return train(build_dataset([s for s in DEV_SESSIONS if s != session], span)[0])
-    return joblib.load(MODEL_PATHS[span])
+        return train(build_dataset([s for s in DEV_SESSIONS if s != session], version)[0])
+    return joblib.load(VERSIONS[version]["path"])
 
 
-def count_box(seg: pd.DataFrame, model, usb_axis, span: str = "dip") -> dict:
+def count_box(seg: pd.DataFrame, model, usb_axis, version: str = "v1") -> dict:
     """The frozen counters on one box, exactly as on an annotated set (detector.build_dataset), then
     min-reps-v1. The kept reps' times come back on the host clock."""
     rule = count_set(seg)["angle"]
-    humps = hump_features(seg, usb_axis, span)
+    humps = hump_features(seg, usb_axis, version)
     p = model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else np.array([])
     kept = combined_times(rule.times, humps["t_top"].to_numpy(), p)
     reps = min_reps(kept)
@@ -188,14 +188,14 @@ def place_reps(reps: pd.DataFrame, ann: pd.DataFrame, idle_after: float | None =
     return pd.Series(out, index=reps.index, dtype=object)
 
 
-def score(session: str, usb_axis, span: str = "dip") -> dict:
+def score(session: str, usb_axis, version: str = "v1") -> dict:
     """Find and count the sets in one whole recording, then line them up with the annotations and
     with the same counters run on the Enter-press boxes."""
     df, angle, lifts, boxes = replay(session, usb_axis)
     ann = with_true_reps(load_annotations(session), session)
-    model = model_for(session, span)
+    model = model_for(session, version)
     per_box, per_set = match_boxes(boxes, ann)
-    counts = [count_box(slice_set(df, {"start_host_t": b.start, "end_host_t": b.end}), model, usb_axis, span)
+    counts = [count_box(slice_set(df, {"start_host_t": b.start, "end_host_t": b.end}), model, usb_axis, version)
               for b in boxes]
     for col in ("rule", "learned", "combined", "min_reps"):
         per_box[col] = [c[col] for c in counts]
@@ -203,7 +203,7 @@ def score(session: str, usb_axis, span: str = "dip") -> dict:
                          for x in c["rep_times"]], columns=["t", "box", "box_on"])
     reps["where"] = place_reps(reps, ann, IDLE_AFTER.get(session))
 
-    humps, sets = build_dataset([session], span)
+    humps, sets = build_dataset([session], version)
     enter = add_counts(sets, humps, pd.Series(model.predict_proba(humps[FEATURES])[:, 1], index=humps.index))
     per_set = per_set.merge(ann[["set_idx", "true_reps", "start_host_t", "end_host_t"]], on="set_idx").merge(
         enter[["set_idx", "min_reps_count"]].rename(columns={"min_reps_count": "enter"}), on="set_idx")
@@ -319,13 +319,12 @@ def main():
     parser = argparse.ArgumentParser(description="Find and count sets in whole recordings without the Enter presses.")
     parser.add_argument("sessions", nargs="+")
     parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--detector", choices=["v1", "v2"], default="v1", help="learned model inside the counters")
+    parser.add_argument("--detector", choices=list(VERSIONS), default="v1", help="learned model inside the counters")
     args = parser.parse_args()
-    span = {"v1": "dip", "v2": "lift"}[args.detector]
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
     rows, results = [], []
     for session in args.sessions:
-        r = score(session, usb_axis, span)
+        r = score(session, usb_axis, args.detector)
         results.append(r)
         rows.append(summary_row(r))
         s, reps = r["per_set"], r["reps"]

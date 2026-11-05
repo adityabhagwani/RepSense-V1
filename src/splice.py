@@ -258,7 +258,7 @@ class Library:
     chunks: dict  # "distractor": walk/adjust/rerack chunks, "edge": rerack chunks; each (start, end, rotvec)
     chunk_from: dict  # the same keys: which distractor (walk, adjust, rerack) each chunk was cut from
     model: object = None
-    span: str = "dip"  # the learned model's hump span: "dip" = detector-v1, "lift" = detector-v2
+    version: str = "v1"  # detector version inside the counters
 
 
 def movement_chunks(raw: pd.DataFrame, ann: pd.DataFrame, exercises, bottom_up, rng,
@@ -285,7 +285,7 @@ def movement_chunks(raw: pd.DataFrame, ann: pd.DataFrame, exercises, bottom_up, 
     return out, source
 
 
-def load_library(session: str, seed: int = 0, span: str = "dip") -> Library:
+def load_library(session: str, seed: int = 0, version: str = "v1") -> Library:
     raw, ann = load_session(session), load_annotations(session)
     pieces = rep_pieces(session)
     glue = hang_clips(session, pieces)
@@ -293,7 +293,7 @@ def load_library(session: str, seed: int = 0, span: str = "dip") -> Library:
     found = {"distractor": movement_chunks(raw, ann, ("walk", "adjust", "rerack"), glue.bottom_up, rng),
               "edge": movement_chunks(raw, ann, ("rerack",), glue.bottom_up, rng)}
     return Library(session, raw, pieces, glue, {k: v[0] for k, v in found.items()}, {k: v[1] for k, v in found.items()},
-                   model_for(session, span), span)
+                   model_for(session, version), version)
 
 
 def pool(pieces: pd.DataFrame, kind: str) -> pd.DataFrame:
@@ -434,25 +434,25 @@ def degrade(seg: pd.DataFrame, share_dropped, clip_dps, seed: int) -> pd.DataFra
     return out
 
 
-def count_recipe(recipe: Recipe, raw: pd.DataFrame, model, usb_axis, span: str = "dip") -> dict:
+def count_recipe(recipe: Recipe, raw: pd.DataFrame, model, usb_axis, version: str = "v1") -> dict:
     seg = splice(raw, recipe.parts)
     lv = recipe.levers
     if "degrade_seed" in lv:
         seg = degrade(seg, lv["dropped_samples"], lv["clipped"], lv["degrade_seed"])
     return {"session": recipe.session, "truth": recipe.truth, **lv,
-            **{k: v for k, v in count_box(seg, model, usb_axis, span).items() if k != "rep_times"}}
+            **{k: v for k, v in count_box(seg, model, usb_axis, version).items() if k != "rep_times"}}
 
 
-def screen(n_sets: int, seed: int, usb_axis, span: str = "dip") -> pd.DataFrame:
+def screen(n_sets: int, seed: int, usb_axis, version: str = "v1") -> pd.DataFrame:
     """n_sets spliced sets, each from a random session with random levers. Set i is built from
     default_rng([seed, i]), so any one can be rebuilt later (e.g. for the count-error model's features)."""
-    libs = {s: load_library(s, seed, span) for s in LIBRARY}
+    libs = {s: load_library(s, seed, version) for s in LIBRARY}
     rows = []
     for i in range(n_sets):
         rng = np.random.default_rng([seed, i])
         lib = libs[LIBRARY[rng.integers(len(LIBRARY))]]
         rows.append({"set": i, **count_recipe(build_lever_set(rng, lib, plan_levers(rng)), lib.raw, lib.model, usb_axis,
-                                              span)})
+                                              version)})
     return pd.DataFrame(rows)
 
 
@@ -549,16 +549,15 @@ def main():
     parser.add_argument("--null", action="store_true", help="the null check: shuffled plain full reps only")
     parser.add_argument("--screen", type=int, metavar="N", help="N spliced sets with random levers")
     parser.add_argument("--plot", action="store_true", help="with --screen: dose curves for the levers")
-    parser.add_argument("--detector", choices=["v1", "v2"], default="v1", help="learned model inside the counters")
+    parser.add_argument("--detector", choices=["v1", "v2", "v3", "v4", "v5"], default="v1", help="learned model inside the counters")
     parser.add_argument("--per-session", type=int, default=40)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
-    span = {"v1": "dip", "v2": "lift"}[args.detector]
-    tag = "" if args.detector == "v1" else "_v2"
+    tag = "" if args.detector == "v1" else f"_{args.detector}"
     counters = ["rule", "learned", "combined", "min_reps"]
     if args.screen:
-        df = screen(args.screen, args.seed, usb_axis, span)
+        df = screen(args.screen, args.seed, usb_axis, args.detector)
         out = REPORTS_DIR / f"splice_screen_{args.seed}{tag}.csv"
         df.to_csv(out, index=False)
         print(f"{len(df)} spliced sets saved to {out.relative_to(REPORTS_DIR.parent)}")
@@ -575,10 +574,10 @@ def main():
     rng = np.random.default_rng(args.seed)
     rows = []
     for session in LIBRARY:
-        raw, pieces, model = load_session(session), rep_pieces(session), model_for(session, span)
+        raw, pieces, model = load_session(session), rep_pieces(session), model_for(session, args.detector)
         glue = hang_clips(session, pieces)
         for _ in range(args.per_session):
-            rows.append(count_recipe(null_recipe(rng, session, pieces, glue), raw, model, usb_axis, span))
+            rows.append(count_recipe(null_recipe(rng, session, pieces, glue), raw, model, usb_axis, args.detector))
     df = pd.DataFrame(rows)
     hit = df[counters].eq(df["truth"], axis=0)
     print("null check: shuffled plain full reps, share of spliced sets counted exactly right")

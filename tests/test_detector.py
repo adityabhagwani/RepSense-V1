@@ -175,12 +175,37 @@ def test_lift_span_starts_where_the_lift_leaves_its_dip_not_at_the_dip():
 def test_a_rest_before_a_rep_no_longer_changes_its_measured_lift():
     """Spliced sets (PLAN.md 11-04): v1 measured a rep from the lowest point since the last hump, so a
     10 s rest before it read as a 10 s rise and the veto removed a real rep. v2 measures the lift."""
-    def rep_after(rest_s, span):
+    def rep_after(rest_s, version):
         angle = np.r_[elevation([FULL, FULL]), np.zeros(int(rest_s * FS)), elevation([FULL, FULL])]
-        return hump_features(sensors(angle, mount_seed=5, seed=1), span=span).iloc[2]
-    v1_short, v1_long = rep_after(0.2, "dip"), rep_after(10.0, "dip")
-    v2_short, v2_long = rep_after(0.2, "lift"), rep_after(10.0, "lift")
+        return hump_features(sensors(angle, mount_seed=5, seed=1), version=version).iloc[2]
+    v1_short, v1_long = rep_after(0.2, "v1"), rep_after(10.0, "v1")
+    v2_short, v2_long = rep_after(0.2, "v2"), rep_after(10.0, "v2")
     assert v1_long["rise_s"] - v1_short["rise_s"] > 5          # the flaw, as frozen in detector-v1
     for f, tol in [("rise_s", 0.1), ("fall_s", 0.1), ("twist_deg", 3), ("jitter_dps", 1), ("one_axis_share", 0.02)]:
         assert abs(v2_long[f] - v2_short[f]) < tol, f
     assert v2_long["start_deg"] == pytest.approx(v1_long["start_deg"])  # dips themselves are unchanged
+
+
+def test_v3_rhythm_only_counts_a_hump_that_comes_too_soon():
+    """v2 still vetoed the reps either side of a rest: their gap was 2-4x the usual. In v3 a rest is no
+    evidence against a rep; a twitch right after a rep still is."""
+    rest = np.r_[elevation([FULL] * 3), np.zeros(int(10 * FS)), elevation([FULL] * 3)]
+    v2 = hump_features(sensors(rest, mount_seed=6, seed=2), version="v2")
+    v3 = hump_features(sensors(rest, mount_seed=6, seed=2), version="v3")
+    assert v2["rhythm_off"].iloc[2] > 1 and abs(v3["rhythm_off"].iloc[2]) < 1e-9 and abs(v3["rhythm_off"].iloc[3]) < 1e-9
+    bump = 40 * (1 - np.cos(2 * np.pi * np.arange(int(0.6 * FS)) / int(0.6 * FS))) / 2  # a quick 40 deg twitch
+    twitch = np.r_[elevation([FULL] * 3)[:-int(0.7 * FS)], bump, elevation([FULL] * 2)]  # ~1.3 s after a rep
+    t3 = hump_features(sensors(twitch, mount_seed=6, seed=2), version="v3")
+    assert len(t3) == 6 and t3["rhythm_off"].iloc[3] > 0.2 and t3["rhythm_off"].iloc[3] == t3["rhythm_off"].max()
+
+
+def test_v4_has_no_rhythm_and_v5_only_looks_back():
+    bump = 40 * (1 - np.cos(2 * np.pi * np.arange(int(0.6 * FS)) / int(0.6 * FS))) / 2
+    twitch = np.r_[elevation([FULL] * 3)[:-int(0.7 * FS)], bump, elevation([FULL] * 2)]
+    raw = sensors(twitch, mount_seed=6, seed=2)
+    assert (hump_features(raw, version="v4")["rhythm_off"] == 0).all()
+    v5 = hump_features(raw, version="v5")["rhythm_off"]
+    assert v5.iloc[3] > 0.3 and v5.iloc[:2].eq(0).all()  # the twitch came too soon; the first two have no past
+    # looking back only: what comes after a hump never changes its v5 rhythm
+    cut = hump_features(sensors(twitch[: int(9.0 * FS)], mount_seed=6, seed=2), version="v5")["rhythm_off"]
+    assert np.allclose(cut.iloc[:4], v5.iloc[:4])
