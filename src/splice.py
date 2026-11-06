@@ -34,7 +34,7 @@ import pandas as pd
 from scipy.spatial.transform import Rotation
 
 from src.dataio import ACCEL, DATA_DIR, GYRO, load_annotations, load_session, parse_marked, slice_set
-from src.detector import build_dataset
+from src.detector import VERSIONS, build_dataset
 from src.labels import USB_AXIS_FILE
 from src.make_script import PROTOCOLS_DIR
 from src.stream import UNRESOLVED, count_box, flagged_sets, model_for
@@ -54,8 +54,10 @@ LIBRARY = ("dev1b", "dev2b", "p2_s1", "p4_s1", "p5_s1")
 
 # Levers: suspected trip-ups planted into spliced sets. Each is on with chance P_ON, at a random dose.
 P_ON = 0.3
-LEVERS = ("uneven_rest", "long_pause", "pause_reps", "speed_mix", "alternating", "half_lifts", "drift_reps",
-          "distractor_bit", "edge_pickup", "relaxed_start", "dropped_samples", "clipped")
+FIRST_LEVERS = ("uneven_rest", "long_pause", "pause_reps", "speed_mix", "alternating", "half_lifts", "drift_reps",
+                "distractor_bit", "edge_pickup", "relaxed_start", "dropped_samples", "clipped")
+LEVERS = FIRST_LEVERS + ("half_lowers",)  # half_lowers (11-05) draws from its own random stream, so a set
+                                          # without it is built exactly as before it existed
 SET_LENGTH = (2, 15)      # reps per spliced set, always random
 RAMP_S = 0.8              # a relaxed start eases into the curl posture over this long, with the matching
                           # turn added to the gyro (a sudden jump would move gravity with no rotation)
@@ -105,7 +107,7 @@ def rep_pieces(session: str) -> pd.DataFrame:
             rows.append({"session": session, "set_idx": set_idx, "condition": cond, "n": n,
                          "kind": marks.get(n, "full"), "full": bool(hump["label"]),
                          "t_start": cuts.loc[k, "t_start"], "t_end": cuts.loc[k, "t_end"],
-                         "top_deg": hump["top_deg"],
+                         "top_deg": hump["top_deg"], "start_deg": hump["start_deg"], "end_deg": hump["end_deg"],
                          "clean_ends": max(hump["start_deg"], hump["end_deg"]) <= HANG_DEG})
     return pd.DataFrame(rows)
 
@@ -296,9 +298,35 @@ def load_library(session: str, seed: int = 0, version: str = "v1") -> Library:
                    model_for(session, version), version)
 
 
+def half_lower_pairs(pieces: pd.DataFrame) -> pd.DataFrame:
+    """A scripted half-lower (or a run of them) and the full lift after it, as one piece: one rep, the arm
+    stopping partway down in between. Used only if it starts and ends within HANG_DEG of hanging and
+    every half-lower in it really stopped above that."""
+    rows = []
+    for _, s in pieces.groupby("set_idx"):  # one session's pieces
+        s = s.sort_values("n").reset_index(drop=True)
+        k = 0
+        while k < len(s):
+            if s.loc[k, "kind"] != "half_lower":
+                k += 1
+                continue
+            j = k
+            while j < len(s) and s.loc[j, "kind"] == "half_lower":
+                j += 1
+            if (j < len(s) and s.loc[j, "full"] and s.loc[k, "start_deg"] <= HANG_DEG
+                    and s.loc[j, "end_deg"] <= HANG_DEG and (s.loc[k:j - 1, "end_deg"] > HANG_DEG).all()):
+                rows.append({"set_idx": s.loc[k, "set_idx"], "n": s.loc[k, "n"], "humps": j - k + 1,
+                             "t_start": s.loc[k, "t_start"], "t_end": s.loc[j, "t_end"]})
+            k = j + 1
+    return pd.DataFrame(rows, columns=["set_idx", "n", "humps", "t_start", "t_end"])
+
+
 def pool(pieces: pd.DataFrame, kind: str) -> pd.DataFrame:
     """Usable reps of one kind: base (plain full reps from normal-paced sets), fast, slow, alternating,
-    pause, drift (full reps), half_lift (not a full rep)."""
+    pause, drift (full reps), half_lift (not a full rep), half_lower (a half-lower and the lift after
+    it: one full rep)."""
+    if kind == "half_lower":
+        return half_lower_pairs(pieces)
     p = pieces[pieces["clean_ends"]]
     if kind == "half_lift":
         return p[p["kind"] == "half_lift"]
@@ -313,7 +341,7 @@ def pool(pieces: pd.DataFrame, kind: str) -> pd.DataFrame:
 
 def plan_levers(rng: np.random.Generator) -> dict:
     """Which levers are on and at what dose (None = off)."""
-    on = {k: rng.random() < P_ON for k in LEVERS}
+    on = {k: rng.random() < P_ON for k in FIRST_LEVERS}
     dose = {
         "uneven_rest": rng.uniform(0.5, 3.0),          # the longest extra rest between reps, s
         "long_pause": rng.uniform(2.0, 15.0),          # one extra rest, s
@@ -329,10 +357,13 @@ def plan_levers(rng: np.random.Generator) -> dict:
         "dropped_samples": rng.uniform(0.01, 0.05),    # share of samples lost, in bursts of 2-10
         "clipped": rng.uniform(150.0, 400.0),          # gyro saturates at this many deg/s
     }
-    plan = {k: (dose[k] if on[k] else None) for k in LEVERS}
+    plan = {k: (dose[k] if on[k] else None) for k in FIRST_LEVERS}
     plan["set_length"] = int(rng.integers(SET_LENGTH[0], SET_LENGTH[1] + 1))
     plan["speed"] = "fast" if rng.random() < 0.5 else "slow"
     plan["edge_side"] = "before" if rng.random() < 0.5 else "after"
+    side = rng.spawn(1)[0]  # a child stream: drawing from it leaves rng where it was
+    plan["half_lowers"] = int(side.integers(1, 4)) if side.random() < P_ON else None  # reps swapped for a
+    plan["side_rng"] = side                                                          # half-lower and its next lift
     return plan
 
 
@@ -362,6 +393,12 @@ def build_lever_set(rng: np.random.Generator, lib: Library, plan: dict) -> Recip
     swap("alternating", max(1, round((plan["alternating"] or 0) * n)), "alternating")
     swap("pause", plan["pause_reps"] or 0, "pause_reps")
     swap("drift", plan["drift_reps"] or 0, "drift_reps")
+    count = min(plan.get("half_lowers") or 0, len(free))
+    pairs = pool(lib.pieces, "half_lower") if count else None
+    if count and len(pairs):  # last, so the swaps above take the same positions as before it existed
+        for pos, piece in zip([free.pop() for _ in range(count)], draw(plan["side_rng"], pairs, count)):
+            reps[pos] = piece
+        applied["half_lowers"] = plan["half_lowers"]
     seq = [("rep", [r]) for r in reps]  # (kind, parts); only "rep" counts toward the truth
 
     def insert_inside(item):  # between two reps, never before the first or after the last
@@ -478,6 +515,7 @@ DOSE_PANELS = [  # lever, title, x axis, bins for a continuous dose (None: one p
     ("long_pause", "Long rest at the bottom", "rest, s", [2, 5, 8, 10, 12, 13.5, 15]),
     ("distractor_bit", "Walk / adjust / rerack inside the set", "length of the movement, s", [3, 4, 5, 6, 7, 8]),
     ("half_lifts", "Half lifts", "half lifts inserted", None),
+    ("half_lowers", "Half-lowers", "reps swapped for a half-lower + next lift", None),
     ("pause_reps", "Reps held halfway up", "reps held", None),
     ("edge_pickup", "Rerack near the first or last rep", "gap to the rep, s", [0, 3, 6, 9, 12, 15]),
     ("uneven_rest", "Uneven rest between reps", "longest extra rest, s", [0.5, 1, 1.5, 2, 2.5, 3]),
@@ -502,7 +540,9 @@ def plot_doses(df: pd.DataFrame, path) -> None:
 
     ink, muted, grid = "#1f2328", "#6e7781", "#d0d7de"
     series = [("min_reps", "min-reps-v1 (shipped)", "#2a78d6"), ("combined", "combined-v1", "#eb6834")]
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), sharey=True)
+    fig, axes = plt.subplots(2, 4, figsize=(18, 8), sharey=True)
+    for ax in axes.ravel()[len(DOSE_PANELS):]:
+        ax.axis("off")
     for ax, (lever, title, xlabel, bins) in zip(axes.ravel(), DOSE_PANELS):
         on = df[df[lever].notna()]
         key = on[lever].round().astype(int) if bins is None else pd.cut(on[lever], bins)
@@ -549,7 +589,7 @@ def main():
     parser.add_argument("--null", action="store_true", help="the null check: shuffled plain full reps only")
     parser.add_argument("--screen", type=int, metavar="N", help="N spliced sets with random levers")
     parser.add_argument("--plot", action="store_true", help="with --screen: dose curves for the levers")
-    parser.add_argument("--detector", choices=["v1", "v2", "v3", "v4", "v5"], default="v1", help="learned model inside the counters")
+    parser.add_argument("--detector", choices=list(VERSIONS), default="v1", help="learned model inside the counters")
     parser.add_argument("--per-session", type=int, default=40)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()

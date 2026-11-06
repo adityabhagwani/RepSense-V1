@@ -8,8 +8,8 @@ import pytest
 from src.counter import count_set
 from src.detector import hump_features
 from src.labels import track_down
-from src.splice import (FS, LEAD_S, Glue, Library, build_lever_set, cut_points, degrade, null_recipe, plan_levers,
-                        relaxed_hang, splice, still_hang_runs, take_hang)
+from src.splice import (FS, LEAD_S, Glue, Library, build_lever_set, cut_points, degrade, half_lower_pairs,
+                        null_recipe, plan_levers, relaxed_hang, splice, still_hang_runs, take_hang)
 from test_counter import elevation
 from test_detector import sensors
 
@@ -99,8 +99,11 @@ def fake_library():
                                     ("pause", "pause", True, 3, 400), ("drift", "drift", True, 3, 500),
                                     ("half_lift", "partial", False, 3, 600)]:
         for k in range(n):
-            rows.append({"kind": kind, "condition": cond, "full": full, "clean_ends": True, "set_idx": 1,
-                         "t_start": t0 + 3.0 * k, "t_end": t0 + 3.0 * k + 2.5})
+            rows.append({"kind": kind, "condition": cond, "full": full, "clean_ends": True, "set_idx": 1, "n": 0,
+                         "start_deg": 2.0, "end_deg": 2.0, "t_start": t0 + 3.0 * k, "t_end": t0 + 3.0 * k + 2.5})
+    for n, (kind, full, start, end) in enumerate([("half_lower", False, 2.0, 60.0), ("full", True, 60.0, 2.0)], 1):
+        rows.append({"kind": kind, "condition": "partial", "full": full, "clean_ends": False, "set_idx": 2, "n": n,
+                     "start_deg": start, "end_deg": end, "t_start": 700.0 + 3.0 * (n - 1), "t_end": 702.5 + 3.0 * (n - 1)})
     glue = Glue(pd.DataFrame({"t_start": [900.0], "t_end": [920.0], "ux": [0.0], "uy": [0.0], "uz": [1.0]}),
                 np.array([0.0, 0.0, 1.0]))
     chunks = {"distractor": [(950.0, 955.0, np.zeros(3))], "edge": [(970.0, 974.0, np.zeros(3))]}
@@ -112,15 +115,28 @@ def test_levers_never_change_the_truth_and_land_where_planned():
     for seed in range(20):
         rng = np.random.default_rng(seed)
         plan = plan_levers(rng)
-        plan.update({k: d for k, d in [("half_lifts", 2), ("distractor_bit", 1), ("pause_reps", 1), ("drift_reps", 1)]})
+        plan.update({k: d for k, d in [("half_lifts", 2), ("distractor_bit", 1), ("pause_reps", 1), ("drift_reps", 1),
+                                       ("half_lowers", 1), ("speed_mix", None), ("alternating", None)]})
         r = build_lever_set(rng, lib, plan)
         starts = [p[0] for p in r.parts]
         assert r.truth == plan["set_length"]
         assert sum(600 <= s < 700 for s in starts) == 2          # the two half lifts are in, but not counted
         assert sum(950 <= s < 960 for s in starts) == 1          # one distractor chunk
-        reps = [s for s in starts if s < 600]
+        pair = [p for p in r.parts if 700 <= p[0] < 800]
+        assert pair == [(700.0, 705.5)] or plan["set_length"] <= 3  # a half-lower + its next lift, one piece
+        reps = [s for s in starts if s < 600 or 700 <= s < 800]
         assert len(reps) == r.truth                              # every counted part is a full rep
         assert starts.index(min(s for s in starts if 600 <= s < 700)) > starts.index(reps[0])  # inside the set
+
+
+def test_a_half_lower_pair_is_one_piece_only_when_it_starts_and_ends_hanging():
+    rows = lambda spec: pd.DataFrame([{"set_idx": 1, "n": n, "kind": k, "full": f, "start_deg": a, "end_deg": b,
+                                       "t_start": 10.0 * n, "t_end": 10.0 * n + 8} for n, (k, f, a, b) in enumerate(spec, 1)])
+    run = rows([("full", True, 1, 2), ("half_lower", False, 2, 50), ("half_lower", False, 50, 45), ("full", True, 45, 3),
+                ("half_lower", False, 3, 8), ("full", True, 8, 2)])  # the last half-lower came all the way down
+    pairs = half_lower_pairs(run)
+    assert pairs[["n", "humps", "t_start", "t_end"]].values.tolist() == [[2, 3, 20.0, 48.0]]
+    assert half_lower_pairs(rows([("half_lower", False, 2, 50), ("full", True, 50, 30)])).empty  # ends high
 
 
 def test_degrade_loses_samples_in_bursts_and_saturates_the_gyro():

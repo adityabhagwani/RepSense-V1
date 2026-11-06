@@ -26,9 +26,9 @@ from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.counter import ANGLE_FLOOR_DEG, HUMP_SHARE, MIN_SPACING_S, count_set, forearm_angle
+from src.counter import ANGLE_FLOOR_DEG, HUMP_SHARE, MIN_SPACING_S, count_set, fall_to_next_lift, forearm_angle
 from src.dataio import load_annotations, load_session, slice_set, with_true_reps
-from src.detector import FEATURES, MATCH_S, combined_times, hump_features, min_reps
+from src.detector import FEATURES, MATCH_S, VERSIONS, combined_times, hump_features, min_reps
 from src.labels import USB_AXIS_FILE
 from src.splice import LIBRARY, build_lever_set, degrade, load_library, plan_levers, splice
 from src.stream import UNRESOLVED, flagged_sets, model_for
@@ -66,7 +66,7 @@ def symptoms(seg: pd.DataFrame, model, usb_axis, version: str = "v4") -> dict:
     shipped counter's (min-reps with the learned veto); #10 and #6 are about the rule's cut."""
     t = seg["t"].to_numpy()
     fs = 1 / np.median(np.diff(t))
-    rule = count_set(seg)["angle"]
+    rule = count_set(seg, VERSIONS[version]["rule"])["angle"]
     humps = hump_features(seg, usb_axis, version)
     p = model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else np.array([])
     tops = humps["t_top"].to_numpy()
@@ -81,8 +81,8 @@ def symptoms(seg: pd.DataFrame, model, usb_axis, version: str = "v4") -> dict:
     lag = int(round(gap * fs)) if len(gaps) else 0
     strength = np.corrcoef(angle[:-lag], angle[lag:])[0, 1] if 0 < lag < len(angle) - 2 else np.nan
 
-    _, props = find_peaks(angle, prominence=ANGLE_FLOOR_DEG, distance=max(1, int(MIN_SPACING_S * fs)))
-    prom = props["prominences"]
+    peaks, props = find_peaks(angle, prominence=ANGLE_FLOOR_DEG, distance=max(1, int(MIN_SPACING_S * fs)))
+    prom = props["prominences"] if VERSIONS[version]["rule"] == "v2" or not len(peaks) else fall_to_next_lift(angle, peaks)
     moved = [int((prom >= HUMP_SHARE * (1 + d) * np.median(prom)).sum()) - rule.n for d in (-CUT_WIGGLE, CUT_WIGGLE)] \
         if len(prom) else [0]
 

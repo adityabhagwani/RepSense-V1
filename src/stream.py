@@ -116,7 +116,7 @@ def model_for(session: str, version: str = "v1"):
 def count_box(seg: pd.DataFrame, model, usb_axis, version: str = "v1") -> dict:
     """The frozen counters on one box, exactly as on an annotated set (detector.build_dataset), then
     min-reps-v1. The kept reps' times come back on the host clock."""
-    rule = count_set(seg)["angle"]
+    rule = count_set(seg, VERSIONS[version]["rule"])["angle"]
     humps = hump_features(seg, usb_axis, version)
     p = model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else np.array([])
     kept = combined_times(rule.times, humps["t_top"].to_numpy(), p)

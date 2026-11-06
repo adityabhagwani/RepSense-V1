@@ -13,6 +13,12 @@ Their disagreement is an error-model feature (FEATURES.md #9).
 
 Tuned only on dev sessions, then frozen (git tag counter-v1) before any held-out session.
 
+counter-v3 (11-05) sizes an angle hump by how far it comes back down before the next real lift
+starts, instead of how far it stands above the dips beside it. A lower-halfway rep (half-lower) and
+the lift after it make two humps for one rep; height kept whichever of the two tops was taller, so
+it sometimes kept the half-lower and the learned check then vetoed it, losing a real rep. The rep
+that never came back down is the one dropped now: the next lift starts high.
+
     python -m src.counter dev1 dev1b dev2b
 """
 
@@ -50,6 +56,22 @@ def lift_span(angle: np.ndarray, dip_before: int, top: int, dip_after: int, shar
     return dip_before + int(np.nonzero(rise)[0][-1]), top + int(np.nonzero(fall)[0][0])
 
 
+RULES = ("v2", "v3")  # counter-v2: height above the dips beside it; counter-v3: fall to the next real lift
+
+
+def fall_to_next_lift(x: np.ndarray, peaks: np.ndarray, share: float = HUMP_SHARE) -> np.ndarray:
+    """How far each hump comes back down before the next real lift: the next hump whose top reaches at
+    least `share` of the set's typical top. A small wobble on the way down, or a half lift after a full
+    rep, is not a next lift, so it doesn't cut the fall short."""
+    tall = np.nonzero(x[peaks] >= share * np.median(x[peaks]))[0]
+    falls = []
+    for k, top in enumerate(peaks):
+        later = tall[tall > k]
+        end = peaks[later[0]] if len(later) else len(x) - 1
+        falls.append(x[top] - x[top:end + 1].min())
+    return np.array(falls)
+
+
 @dataclass
 class Count:
     n: int                   # reps counted
@@ -66,6 +88,7 @@ def count_humps(x: np.ndarray, t: np.ndarray, floor: float, size: str = "promine
     size="prominence": how far a hump stands above the dips beside it (angle humps).
     size="height": how far it rises above zero (rotation swings: a swing in the middle of a set
     sits between two opposite swings and would look twice as prominent as the last one).
+    size="fall": how far it comes back down before the next real lift (angle humps, counter-v3).
     """
     fs = 1 / np.median(np.diff(t))
     spacing = max(1, int(MIN_SPACING_S * fs))
@@ -75,7 +98,9 @@ def count_humps(x: np.ndarray, t: np.ndarray, floor: float, size: str = "promine
         peaks, props = find_peaks(x, prominence=floor, distance=spacing)
     if len(peaks) == 0:
         return Count(0, np.array([]), np.array([]), 0, 0.0, 0)
-    prom = props["peak_heights"] if size == "height" else props["prominences"]
+    prom = {"height": props.get("peak_heights"), "prominence": props.get("prominences")}.get(size)
+    if size == "fall":
+        prom = fall_to_next_lift(x, peaks)
     typical = float(np.median(prom))
     cut = HUMP_SHARE * typical
     keep = prom >= cut
@@ -101,9 +126,9 @@ def lowering_rate(seg: pd.DataFrame) -> np.ndarray:
     return -rate if first > 0 else rate
 
 
-def count_set(seg: pd.DataFrame) -> dict:
+def count_set(seg: pd.DataFrame, rule: str = "v2") -> dict:
     t = seg["t"].to_numpy()
-    by_angle = count_humps(forearm_angle(seg), t, ANGLE_FLOOR_DEG)
+    by_angle = count_humps(forearm_angle(seg), t, ANGLE_FLOOR_DEG, size="prominence" if rule == "v2" else "fall")
     by_gyro = count_humps(lowering_rate(seg), t, GYRO_FLOOR_DPS, size="height")
     return {"angle": by_angle, "gyro": by_gyro}
 

@@ -17,7 +17,9 @@ too soon); a rest before a rep is no evidence against it. With v2, the reps eith
 rest still sat 2-4x the usual gap from a neighbour and were vetoed. Two comparisons: v4 drops the
 rhythm feature (held at 0, so the model can't use it); v5 is v3 made causal, using only the gap to the
 previous hump against the earlier gaps, as a live band would know it (the other features still
-look ahead).
+look ahead). detector-v6 (11-05) is v4 measuring height the counter-v3 way (how far a hump comes back
+down before the next real lift), and its stack counts with counter-v3: the rule and the learned check
+then agree on which hump of a half-lower is the rep.
 
 Labels come from the scripts: in a scripted set whose hump count matches its scripted lifts,
 hump n gets lift n's mark (half_lift / half_lower -> not a full rep, everything else -> full);
@@ -40,7 +42,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.counter import ANGLE_FLOOR_DEG, MIN_SPACING_S, SMOOTH_HZ, count_set, lift_span
+from src.counter import ANGLE_FLOOR_DEG, MIN_SPACING_S, SMOOTH_HZ, count_set, fall_to_next_lift, lift_span
 from src.dataio import (ACCEL, GYRO, HALF_KINDS, load_annotations, load_session, movement_count,
                         parse_marked, slice_set, with_true_reps)
 from src.labels import USB_AXIS_FILE, segment_angle, settle, track_down
@@ -49,12 +51,14 @@ from src.sync import lowpass
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_PATH = MODELS_DIR / "detector.joblib"  # detector-v1 (frozen)
-VERSIONS = {  # how each detector version measures a hump; each has its own model file
-    "v1": {"span": "dip", "rhythm": "both", "path": MODEL_PATH},
-    "v2": {"span": "lift", "rhythm": "both", "path": MODELS_DIR / "detector_v2.joblib"},
-    "v3": {"span": "lift", "rhythm": "short", "path": MODELS_DIR / "detector_v3.joblib"},
-    "v4": {"span": "lift", "rhythm": "none", "path": MODELS_DIR / "detector_v4.joblib"},
-    "v5": {"span": "lift", "rhythm": "past", "path": MODELS_DIR / "detector_v5.joblib"},
+VERSIONS = {  # how each detector version measures a hump, and which rule counter its stack uses; each has
+              # its own model file
+    "v1": {"span": "dip", "rhythm": "both", "height": "prominence", "rule": "v2", "path": MODEL_PATH},
+    "v2": {"span": "lift", "rhythm": "both", "height": "prominence", "rule": "v2", "path": MODELS_DIR / "detector_v2.joblib"},
+    "v3": {"span": "lift", "rhythm": "short", "height": "prominence", "rule": "v2", "path": MODELS_DIR / "detector_v3.joblib"},
+    "v4": {"span": "lift", "rhythm": "none", "height": "prominence", "rule": "v2", "path": MODELS_DIR / "detector_v4.joblib"},
+    "v5": {"span": "lift", "rhythm": "past", "height": "prominence", "rule": "v2", "path": MODELS_DIR / "detector_v5.joblib"},
+    "v6": {"span": "lift", "rhythm": "none", "height": "fall", "rule": "v3", "path": MODELS_DIR / "detector_v6.joblib"},
 }
 GATE = 0.05      # combined: a rule-counted hump must look at least this likely to be a full rep to the
                  # learned model; set before seeing combined results, not tuned
@@ -64,7 +68,7 @@ MIN_REPS_GAP_S = 12.0  # min-reps-v1 (frozen 11-04): a combined-counted rep coun
                        # distractors come one at a time; the longest gap between lifts in a set is 9.7 s
 SCRIPTED = ("normal", "slow", "fast", "pause", "alternating", "partial", "drift")
 FEATURES = [
-    "height_deg",      # how far the hump rises above the dips beside it
+    "height_deg",      # how far the hump rises above the dips beside it (v6: how far it comes back down)
     "height_share",    # that, relative to the set's typical hump (what the rule counter uses)
     "top_deg",         # forearm angle at the top, from hanging: walking never gets far
     "start_deg",       # forearm angle at the dip before: high after a "lower halfway"
@@ -82,7 +86,7 @@ FEATURES = [
 def hump_features(seg: pd.DataFrame, usb_axis=None, version: str = "v1") -> pd.DataFrame:
     """One row per candidate hump in a set: the features above plus t_top (s from set start), measured
     the way `version` does (VERSIONS): timing and motion dip to dip (v1) or over the lift itself."""
-    span, rhythm = VERSIONS[version]["span"], VERSIONS[version]["rhythm"]
+    span, rhythm, height = (VERSIONS[version][k] for k in ("span", "rhythm", "height"))
     t, gyro, accel = seg["t"].to_numpy(), seg[GYRO].to_numpy(), seg[ACCEL].to_numpy()
     fs = 1 / np.median(np.diff(t))
     down = track_down(t, gyro, accel)
@@ -100,6 +104,7 @@ def hump_features(seg: pd.DataFrame, usb_axis=None, version: str = "v1") -> pd.D
     shake = speed - lowpass(t, speed, SMOOTH_HZ)
     gaps = np.diff(t[peaks])
     usual_gap = np.median(gaps) if len(gaps) else np.nan
+    sizes = props["prominences"] if height == "prominence" else fall_to_next_lift(angle, peaks)
 
     rows = []
     for k, top in enumerate(peaks):
@@ -110,7 +115,7 @@ def hump_features(seg: pd.DataFrame, usb_axis=None, version: str = "v1") -> pd.D
         sv = np.linalg.svd(gyro[part], full_matrices=False)[1]
         neighbors = [g for g in (gaps[k - 1] if k > 0 else None, gaps[k] if k < len(gaps) else None) if g is not None]
         rows.append({
-            "height_deg": props["prominences"][k],
+            "height_deg": sizes[k],
             "top_deg": angle[top], "start_deg": angle[a], "end_deg": angle[b],
             "rise_s": t[top] - t[s0], "fall_s": t[s1] - t[top],
             "jitter_dps": float(np.sqrt(np.mean(shake[part] ** 2))),
@@ -171,7 +176,7 @@ def build_dataset(sessions: list[str], version: str = "v1") -> tuple[pd.DataFram
             f["session"], f["set_idx"] = session, int(a["set_idx"])
             humps.append(f)
             true = 0 if a["condition"] == "distractor" else int(a["true_reps"])
-            rule = count_set(seg)["angle"]
+            rule = count_set(seg, VERSIONS[version]["rule"])["angle"]
             sets.append({"session": session, "set_idx": int(a["set_idx"]), "condition": a["condition"],
                          "exercise": a["exercise"], "true_reps": true, "rule_count": rule.n,
                          "rule_times": rule.times})
