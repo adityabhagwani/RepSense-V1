@@ -15,6 +15,10 @@ They have never seen p2 to p5, and **nothing gets tuned on this data**.
 | `p4_s2` | p4 | `protocols/p4_s2.csv` | Position B |
 | `p5_s1` | p5 | `protocols/p5_s1.csv` | Position A |
 | `p5_s2` | p5 | `protocols/p5_s2.csv` | Position B |
+| `p6_s1` | p6 | `protocols/p6_s1.csv` | Position A |
+| `p6_s2` | p6 | `protocols/p6_s2.csv` | Position B |
+| `p7_s1` | p7 | `protocols/p7_s1.csv` | Position A |
+| `p7_s2` | p7 | `protocols/p7_s2.csv` | Position B |
 
 ---
 
@@ -171,8 +175,12 @@ The other sessions have the same kinds of sets in a different, shuffled order. F
 - `p3_s2`: swing → re-rack → normal → slow (rest 10 s) → adjust → walk → alternating (rest 5 s) → pause (rest 10 s) → fast → partial (rest 10 s) → partial → drift (rest 10 s) → drift → exhaustion → swing
 - `p4_s2`: swing → walk → normal (rest 5 s) → drift → partial → fast → slow (rest 15 s) → alternating (rest 15 s) → re-rack → drift → partial (rest 5 s) → pause (rest 10 s) → adjust → exhaustion → swing
 - `p5_s2`: swing → normal → partial (rest 10 s) → adjust → alternating → drift → slow → walk → re-rack → fast (rest 15 s) → pause (rest 10 s) → drift (rest 15 s) → partial → exhaustion → swing
+- `p6_s1`: swing → walk → slow → adjust → alternating → partial → drift (rest 5 s) → fast (rest 10 s) → pause → normal → re-rack → partial (rest 5 s) → drift (rest 5 s) → exhaustion → swing
+- `p7_s1`: swing → normal → re-rack → slow → partial (rest 5 s) → fast (rest 5 s) → drift → adjust → partial (rest 10 s) → pause → walk → alternating → drift → exhaustion → swing
+- `p6_s2`: swing → partial (rest 10 s) → drift → drift (rest 15 s) → normal → pause → re-rack → adjust → slow (rest 10 s) → alternating → fast → partial → walk → exhaustion → swing
+- `p7_s2`: swing → drift (rest 10 s) → re-rack → walk → drift → pause (rest 5 s) → alternating (rest 10 s) → adjust → slow (rest 15 s) → normal → partial → fast (rest 10 s) → partial → exhaustion → swing
 
-### Two people at once (11-03: p4 and p5), about 2 h 10
+### Two people at once (11-03: p4 and p5; 11-06: p6 and p7, same slots), about 2 h 10
 Alternate people so each gets ~45 min between their own sessions, not 5: the first session's exhaustion set
 would otherwise tire the second. All the session-1s go first, so if someone leaves early they still have one.
 

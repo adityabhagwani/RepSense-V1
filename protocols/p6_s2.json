@@ -1,0 +1,9 @@
+{
+  "session": "p6_s2",
+  "seed": 602,
+  "exercises": [
+    "curl"
+  ],
+  "numpy": "2.5.4",
+  "created": "2026-11-06"
+}

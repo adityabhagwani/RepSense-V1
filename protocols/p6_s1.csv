@@ -1,0 +1,16 @@
+exercise,reps,condition,notes,marked
+sync,0,gesture,"Elbow locked, palm facing your thigh: swing the straight arm forward and back like a pendulum, 3 times, fast. Same plane as a curl, no sideways motion.",
+walk,0,distractor,"Walk around for about 15 s, arms natural. Not a set: the counter should say 0.",
+curl,11,slow,"Slow: 3 s up, 3 s down. Count out loud: 11 lifts. All full and strict.",
+adjust,0,distractor,"Shake out your arm and fiddle with the strap for about 15 s, without moving the band. Not a set.",
+curl,10,alternating,Alternate arms; count only the sensor arm's lifts. Count out loud: 10 lifts. All full and strict.,
+curl,7,partial,"Count out loud: 11 lifts. Lifts 4 and 9: lift only until your forearm is level, then lower. Lifts 2 and 5: lower only until your forearm is level, then start the next lift. All other lifts: full and strict.",2:half_lower;4:half_lift;5:half_lower;9:half_lift
+curl,11,drift,"Count out loud: 11 lifts. Lifts 7, 8 and 10: let your elbow swing forward as you lift, then bring it back. Lift 4: after it, lower all the way and let the arm hang still for 5 s (count it out loud), then carry on. All other lifts: full and strict.",4:rest5;7:drift;8:drift;10:drift
+curl,9,fast,"Fast: as fast as you can while staying in control. Count out loud: 9 lifts. Lift 8: after it, lower all the way and let the arm hang still for 10 s (count it out loud), then carry on. All other lifts: full and strict.",8:rest10
+curl,12,pause,"Count out loud: 13 lifts. Lift 12: lower only until your forearm is level, then start the next lift. Lift 6: hold 2–3 s halfway up, then finish it. All other lifts: full and strict.",6:pause;12:half_lower
+curl,7,normal,"Count out loud: 8 lifts. Lift 4: lower only until your forearm is level, then start the next lift. All other lifts: full and strict.",4:half_lower
+rerack,0,distractor,"Put the dumbbell down and pick it up again, three times. Not a set.",
+curl,12,partial,"Count out loud: 16 lifts. Lifts 5 and 8: lift only until your forearm is level, then lower. Lifts 3 and 11: lower only until your forearm is level, then start the next lift. Lift 7: after it, lower all the way and let the arm hang still for 5 s (count it out loud), then carry on. All other lifts: full and strict.",3:half_lower;5:half_lift;7:rest5;8:half_lift;11:half_lower
+curl,10,drift,"Count out loud: 10 lifts. Lifts 4, 5 and 6: let your elbow swing forward as you lift, then bring it back. Lift 9: after it, lower all the way and let the arm hang still for 5 s (count it out loud), then carry on. All other lifts: full and strict.",4:drift;5:drift;6:drift;9:rest5
+curl,0,exhaustion,Curl until you can't do one more full rep. Count full reps only and TYPE that count at the prompt (Enter would record 0).,
+sync,0,gesture,"Same pendulum swings: elbow locked, palm facing your thigh, forward and back only.",
