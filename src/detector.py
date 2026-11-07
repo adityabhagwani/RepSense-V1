@@ -21,6 +21,12 @@ look ahead). detector-v6 (11-05) is v4 measuring height the counter-v3 way (how 
 down before the next real lift), and its stack counts with counter-v3: the rule and the learned check
 then agree on which hump of a half-lower is the rep.
 
+min-reps-v2 (frozen 11-07) judges lone reps per box (stream-v1's boxes, src/boxes.py, drawn inside the
+set): a box with MIN_REPS_V2_KEEP or more counted reps keeps them all, one with exactly 2 keeps them only
+if they are within MIN_REPS_GAP_S (min-reps-v1), and a rep alone in its box, or in no box, is dropped.
+min-reps-v1 only lets counted reps vouch for each other, so a run of half reps (lifts the box keeps
+together, but not counted) could strand a real rep more than 12 s from the next one (dev1b set 5).
+
 Labels come from the scripts: in a scripted set whose hump count matches its scripted lifts,
 hump n gets lift n's mark (half_lift / half_lower -> not a full rep, everything else -> full);
 every hump in a distractor set is "not a rep". Sets whose counts don't match, and exhaustion
@@ -42,6 +48,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from src.boxes import set_boxes
 from src.counter import ANGLE_FLOOR_DEG, MIN_SPACING_S, SMOOTH_HZ, count_set, fall_to_next_lift, lift_span
 from src.dataio import (ACCEL, GYRO, HALF_KINDS, load_annotations, load_session, movement_count,
                         parse_marked, slice_set, with_true_reps)
@@ -66,6 +73,8 @@ MATCH_S = 0.6    # a rule hump and a learned hump this close in time are the sam
 MIN_REPS_GAP_S = 12.0  # min-reps-v1 (frozen 11-04): a combined-counted rep counts only if another one
                        # peaks within this many seconds. Bends that leak through the veto in
                        # distractors come one at a time; the longest gap between lifts in a set is 9.7 s
+MIN_REPS_V2_KEEP = 3   # min-reps-v2 (frozen 11-07): a box with this many counted reps keeps them all. Two
+                       # stray reps in one walk box (p4_s1 set 13, 16.6 s apart) is why 2 isn't enough
 SCRIPTED = ("normal", "slow", "fast", "pause", "alternating", "partial", "drift")
 FEATURES = [
     "height_deg",      # how far the hump rises above the dips beside it (v6: how far it comes back down)
@@ -179,7 +188,7 @@ def build_dataset(sessions: list[str], version: str = "v1") -> tuple[pd.DataFram
             rule = count_set(seg, VERSIONS[version]["rule"])["angle"]
             sets.append({"session": session, "set_idx": int(a["set_idx"]), "condition": a["condition"],
                          "exercise": a["exercise"], "true_reps": true, "rule_count": rule.n,
-                         "rule_times": rule.times})
+                         "rule_times": rule.times, "boxes": set_boxes(seg, usb_axis) if usb_axis else []})
     return pd.concat(humps, ignore_index=True), pd.DataFrame(sets)
 
 
@@ -222,10 +231,22 @@ def min_reps(times) -> np.ndarray:
     return times[np.r_[False, close] | np.r_[close, False]]
 
 
+def min_reps_v2(times, boxes) -> np.ndarray:
+    """min-reps-v2: the reps (times) kept box by box. `boxes` are (start, end) on the same clock."""
+    times = np.sort(np.asarray(times, float))
+    keep = [times[:0]]
+    for start, end in boxes:
+        mine = times[(times >= start) & (times <= end)]
+        keep.append(mine if len(mine) >= MIN_REPS_V2_KEEP else min_reps(mine))
+    return np.unique(np.concatenate(keep))
+
+
 def add_counts(sets: pd.DataFrame, humps: pd.DataFrame, p: pd.Series) -> pd.DataFrame:
-    """learned_count, combined_count and min_reps_count per set, given a probability for every hump."""
+    """learned_count, combined_count, min_reps_count and (when the sets carry their boxes)
+    min_reps_v2_count per set, given a probability for every hump."""
     out = sets.copy()
-    for col in ("learned_count", "combined_count", "min_reps_count"):
+    cols = ["learned_count", "combined_count", "min_reps_count"] + (["min_reps_v2_count"] if "boxes" in out else [])
+    for col in cols:
         out[col] = 0
     for k, r in out.iterrows():
         mine = (humps["session"] == r["session"]) & (humps["set_idx"] == r["set_idx"])
@@ -234,6 +255,8 @@ def add_counts(sets: pd.DataFrame, humps: pd.DataFrame, p: pd.Series) -> pd.Data
         out.loc[k, "learned_count"] = int((probs >= 0.5).sum())
         out.loc[k, "combined_count"] = len(kept)
         out.loc[k, "min_reps_count"] = len(min_reps(kept))
+        if "boxes" in out:
+            out.loc[k, "min_reps_v2_count"] = len(min_reps_v2(kept, r["boxes"]))
     return out
 
 
@@ -269,7 +292,7 @@ def main():
     args = parser.parse_args()
     model_path = VERSIONS[args.detector]["path"]
     cols = ["session", "set_idx", "condition", "true_reps", "rule_count", "learned_count", "combined_count",
-            "min_reps_count"]
+            "min_reps_count", "min_reps_v2_count"]
 
     if not args.evaluate and args.detector == "v1" and MODEL_PATH.exists() and not args.overwrite_v1:
         parser.error("this would retrain and overwrite the frozen detector-v1 model; add --evaluate, "
@@ -293,6 +316,7 @@ def main():
     print(summarize(result, "learned_count") + "   (each session held out)")
     print(summarize(result, "combined_count") + "   (learned part held out)")
     print(summarize(result, "min_reps_count") + "   (learned part held out)")
+    print(summarize(result, "min_reps_v2_count") + "   (learned part held out)")
 
     model = train(humps)
     MODELS_DIR.mkdir(exist_ok=True)

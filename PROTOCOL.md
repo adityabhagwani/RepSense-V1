@@ -211,11 +211,19 @@ Sync should show a match of **0.8 or higher** at both gestures. Labels may repor
 1. Start from the typed counts.
 2. For each set on your paper notes (and the exhaustion sets), **look only at the raw wrist data** (ax humps). Not the counters or the teacher's lift count.
 3. Where the raw data clearly shows a different number of full reps, add a row to `data/count_fixes.csv`: session, set_idx, full_reps, source, note, date.
+   - Half-lowers (from 11-07): a lift is a full rep only if the forearm comes back to within **15°** of hanging before the next lift. Read it on the settle plot (degrees from the hang). A scripted half-lower that comes back within 15° is a full rep: add a fix row.
 4. Commit the fixes. **Then** run the comparison:
    ```bash
-   .venv/bin/python -m src.detector p2_s1 p2_s2 p3_s1 p3_s2 --evaluate
+   .venv/bin/python -m src.detector p6_s1 p7_s1 --evaluate --detector v4
    ```
-   This prints, per set, the true count and what each frozen counter said, plus a summary for each counter.
+   This prints, per set, the true count and what each frozen counter said, plus a summary for each counter (`min_reps_count` = min-reps-v1, `min_reps_v2_count` = min-reps-v2).
+5. Then the replay without Enter presses, once per rule:
+   ```bash
+   .venv/bin/python -m src.stream p6_s1 p7_s1 --detector v4 --min-reps v1
+   ```
+   ```bash
+   .venv/bin/python -m src.stream p6_s1 p7_s1 --detector v4 --min-reps v2
+   ```
 
 ## 9. If something goes wrong
 | Symptom | What to do |

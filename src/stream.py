@@ -19,89 +19,24 @@ Tuned on dev1b and dev2b only, then frozen (git tag stream-v1) before scoring p2
 import argparse
 import json
 import re
-from dataclasses import dataclass, field
 
 import joblib
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
 
-from src.counter import MIN_SPACING_S, SMOOTH_HZ, count_set, lift_span
-from src.dataio import ACCEL, DATA_DIR, GYRO, load_annotations, load_session, slice_set, with_true_reps
+from src.boxes import (BOX_GAP_S, LIFT_MIN_DEG, PAD_S, Box, Lift, draw_boxes, find_lifts,  # noqa: F401 (moved
+                       set_boxes, stream_angle)                                            # here 11-07; re-exported)
+from src.counter import count_set
+from src.dataio import DATA_DIR, load_annotations, load_session, slice_set, with_true_reps
 from src.detector import (FEATURES, VERSIONS, add_counts, build_dataset, combined_times, hump_features,
-                          min_reps, train)
-from src.labels import USB_AXIS_FILE, segment_angle, track_down
-from src.sync import REPORTS_DIR, lowpass
+                          min_reps, min_reps_v2, train)
+from src.labels import USB_AXIS_FILE
+from src.sync import REPORTS_DIR
 
-LIFT_MIN_DEG = 50.0  # a hump this tall is a lift. Dev: curl-set humps typically 120-138 deg tall,
-                     # walking and strap fiddling 24-37; at 50 every dev1b curl hump passes
-BOX_GAP_S = 12.0     # lifts whose tops are this close belong to one set. Same 12 s as min-reps-v1:
-                     # the longest lift-to-lift time in any dev or held-out set is 9.7 s
-PAD_S = 2.0          # a box starts this long before its first lift (and ends this long after its
-                     # last), so the arm hangs at its start, like after an Enter press
 DEV_SESSIONS = ("dev1", "dev1b", "dev2b")  # what the frozen learned model was trained on
 IDLE_AFTER = {"p3_s1": 1793403434.12}     # sessions.csv: the Nano kept logging an idle arm after this host_t
 UNRESOLVED = {("p3_s1", 2)}                # alternating set whose true count was never settled (typed 9)
 SESSIONS_CSV = DATA_DIR / "sessions.csv"
-
-
-@dataclass
-class Lift:
-    start: float   # the dip before, on the clock passed to find_lifts
-    top: float
-    end: float     # the dip after
-    height: float  # degrees above the higher of the two dips
-
-
-@dataclass
-class Box:
-    start: float
-    end: float
-    lifts: list[Lift] = field(default_factory=list)
-
-
-def stream_angle(df: pd.DataFrame, usb_axis) -> np.ndarray:
-    """Forearm angle from the USB direction over a whole recording, degrees, smoothed. Wrist only."""
-    t = df["t"].to_numpy()
-    down = track_down(t, df[GYRO].to_numpy(), df[ACCEL].to_numpy())
-    return lowpass(t, segment_angle(down, np.asarray(usb_axis, float)), SMOOTH_HZ)
-
-
-def find_lifts(t: np.ndarray, angle: np.ndarray, clock: np.ndarray | None = None) -> list[Lift]:
-    """Humps at least LIFT_MIN_DEG tall and MIN_SPACING_S apart, with the dips on either side.
-
-    `t` sets the sample rate; times are reported on `clock` (default `t`), e.g. host_t so boxes
-    line up with the annotations.
-    """
-    clock = t if clock is None else clock
-    fs = 1 / np.median(np.diff(t))
-    tops, props = find_peaks(angle, prominence=LIFT_MIN_DEG, distance=max(1, int(MIN_SPACING_S * fs)))
-    edges = np.r_[0, tops, len(t) - 1]
-    dips = [edges[k] + int(np.argmin(angle[edges[k]:edges[k + 1] + 1])) for k in range(len(edges) - 1)]
-    lifts = []
-    for k, top in enumerate(tops):
-        start, end = lift_span(angle, dips[k], top, dips[k + 1])
-        lifts.append(Lift(clock[start], clock[top], clock[end], float(props["prominences"][k])))
-    return lifts
-
-
-def draw_boxes(lifts: list[Lift]) -> list[Box]:
-    """Lifts whose tops are at most BOX_GAP_S apart form a group; groups of 2+ become boxes.
-
-    A lone lift makes no box. Padding never reaches into the next box: where two padded boxes
-    would overlap, they meet halfway.
-    """
-    groups: list[list[Lift]] = []
-    for lift in lifts:
-        if groups and lift.top - groups[-1][-1].top <= BOX_GAP_S:
-            groups[-1].append(lift)
-        else:
-            groups.append([lift])
-    boxes = [Box(g[0].start - PAD_S, g[-1].end + PAD_S, g) for g in groups if len(g) >= 2]
-    for a, b in zip(boxes, boxes[1:]):
-        if a.end > b.start:
-            a.end = b.start = (a.lifts[-1].end + b.lifts[0].start) / 2
-    return boxes
 
 
 def model_for(session: str, version: str = "v1"):
@@ -115,14 +50,15 @@ def model_for(session: str, version: str = "v1"):
 
 def count_box(seg: pd.DataFrame, model, usb_axis, version: str = "v1") -> dict:
     """The frozen counters on one box, exactly as on an annotated set (detector.build_dataset), then
-    min-reps-v1. The kept reps' times come back on the host clock."""
+    min-reps-v1 and min-reps-v2. The kept reps' times come back on the host clock."""
     rule = count_set(seg, VERSIONS[version]["rule"])["angle"]
     humps = hump_features(seg, usb_axis, version)
     p = model.predict_proba(humps[FEATURES])[:, 1] if len(humps) else np.array([])
     kept = combined_times(rule.times, humps["t_top"].to_numpy(), p)
-    reps = min_reps(kept)
+    reps, reps_v2 = min_reps(kept), min_reps_v2(kept, set_boxes(seg, usb_axis))
     return {"rule": rule.n, "learned": int((p >= 0.5).sum()), "combined": len(kept), "min_reps": len(reps),
-            "rep_times": seg["host_t"].iloc[0] + reps}
+            "min_reps_v2": len(reps_v2), "rep_times": seg["host_t"].iloc[0] + reps,
+            "rep_times_v2": seg["host_t"].iloc[0] + reps_v2}
 
 
 def set_kind(row) -> str:
@@ -188,26 +124,28 @@ def place_reps(reps: pd.DataFrame, ann: pd.DataFrame, idle_after: float | None =
     return pd.Series(out, index=reps.index, dtype=object)
 
 
-def score(session: str, usb_axis, version: str = "v1") -> dict:
+def score(session: str, usb_axis, version: str = "v1", rule: str = "v1") -> dict:
     """Find and count the sets in one whole recording, then line them up with the annotations and
-    with the same counters run on the Enter-press boxes."""
+    with the same counters run on the Enter-press boxes. `rule`: which min-reps version counts (v1 or v2)."""
+    shipped = "min_reps" if rule == "v1" else "min_reps_v2"
     df, angle, lifts, boxes = replay(session, usb_axis)
     ann = with_true_reps(load_annotations(session), session)
     model = model_for(session, version)
     per_box, per_set = match_boxes(boxes, ann)
     counts = [count_box(slice_set(df, {"start_host_t": b.start, "end_host_t": b.end}), model, usb_axis, version)
               for b in boxes]
-    for col in ("rule", "learned", "combined", "min_reps"):
+    for col in ("rule", "learned", "combined", "min_reps", "min_reps_v2"):
         per_box[col] = [c[col] for c in counts]
+    times = "rep_times" if rule == "v1" else "rep_times_v2"
     reps = pd.DataFrame([{"t": x, "box": k, "box_on": per_box["on"][k]} for k, c in enumerate(counts)
-                         for x in c["rep_times"]], columns=["t", "box", "box_on"])
+                         for x in c[times]], columns=["t", "box", "box_on"])
     reps["where"] = place_reps(reps, ann, IDLE_AFTER.get(session))
 
     humps, sets = build_dataset([session], version)
     enter = add_counts(sets, humps, pd.Series(model.predict_proba(humps[FEATURES])[:, 1], index=humps.index))
     per_set = per_set.merge(ann[["set_idx", "true_reps", "start_host_t", "end_host_t"]], on="set_idx").merge(
-        enter[["set_idx", "min_reps_count"]].rename(columns={"min_reps_count": "enter"}), on="set_idx")
-    per_set["stream"] = per_set["box_ids"].map(lambda ids: int(per_box.loc[ids, "min_reps"].sum()))
+        enter[["set_idx", f"{shipped}_count"]].rename(columns={f"{shipped}_count": "enter"}), on="set_idx")
+    per_set["stream"] = per_set["box_ids"].map(lambda ids: int(per_box.loc[ids, shipped].sum()))
     per_set["edge_reps"] = per_set["box_ids"].map(lambda ids: int((reps["box"].isin(ids) & (reps["where"] == "edge")).sum()))
     once = per_set["result"] == "found once"
     per_set["start_off"] = np.where(once, [boxes[i[0]].start if i else np.nan for i in per_set["box_ids"]], np.nan) \
@@ -224,7 +162,7 @@ def score(session: str, usb_axis, version: str = "v1") -> dict:
     return {"session": session, "df": df, "angle": angle, "lifts": lifts, "boxes": boxes, "ann": ann,
             "per_box": per_box, "per_set": per_set, "reps": reps, "idle_min": idle_min,
             "rest_min": (host[-1] - host[0]) / 60 - in_sets_min - idle_min,
-            "enter_distractor_reps": int(enter.loc[enter["condition"] == "distractor", "min_reps_count"].sum())}
+            "enter_distractor_reps": int(enter.loc[enter["condition"] == "distractor", f"{shipped}_count"].sum())}
 
 
 def summary_row(r: dict) -> dict:
@@ -320,11 +258,13 @@ def main():
     parser.add_argument("sessions", nargs="+")
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--detector", choices=list(VERSIONS), default="v1", help="learned model inside the counters")
+    parser.add_argument("--min-reps", choices=["v1", "v2"], default="v1",
+                        help="which lone-rep rule counts: min-reps-v1 (12 s to another rep) or min-reps-v2 (per box)")
     args = parser.parse_args()
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
     rows, results = [], []
     for session in args.sessions:
-        r = score(session, usb_axis, args.detector)
+        r = score(session, usb_axis, args.detector, args.min_reps)
         results.append(r)
         rows.append(summary_row(r))
         s, reps = r["per_set"], r["reps"]

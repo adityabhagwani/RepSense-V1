@@ -477,7 +477,7 @@ def count_recipe(recipe: Recipe, raw: pd.DataFrame, model, usb_axis, version: st
     if "degrade_seed" in lv:
         seg = degrade(seg, lv["dropped_samples"], lv["clipped"], lv["degrade_seed"])
     return {"session": recipe.session, "truth": recipe.truth, **lv,
-            **{k: v for k, v in count_box(seg, model, usb_axis, version).items() if k != "rep_times"}}
+            **{k: v for k, v in count_box(seg, model, usb_axis, version).items() if not k.startswith("rep_times")}}
 
 
 def screen(n_sets: int, seed: int, usb_axis, version: str = "v1") -> pd.DataFrame:

@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 import src.detector as detector
 from src.counter import lift_span
 from src.detector import (FEATURES, MIN_REPS_GAP_S, combined_count, count_with, hump_features, label_humps,
-                          min_reps, train)
+                          min_reps, min_reps_v2, train)
 from test_counter import FS, FULL, HALF, elevation
 
 
@@ -165,6 +165,30 @@ def test_min_reps_keeps_reps_exactly_the_gap_apart_and_drops_just_beyond():
 def test_min_reps_keeps_a_slow_set_whole():
     slow = [0.0, 9.7, 19.4, 29.1]  # the longest lift-to-lift time seen in a real set
     assert min_reps(slow).tolist() == slow
+
+
+def test_min_reps_v2_keeps_a_rep_stranded_by_half_reps_when_its_box_has_three():
+    reps = [3.8, 18.1, 28.7, 36.7, 44.4]  # dev1b set 5: a half rep at 12.0 s sits between the first two
+    assert min_reps(reps).tolist() == reps[1:]
+    assert min_reps_v2(reps, [(0.0, 47.0)]).tolist() == reps
+
+
+def test_min_reps_v2_needs_two_reps_close_together_in_a_box_of_two():
+    walk = [7.0, 23.6]  # p4_s1 set 13: two stray reps 16.6 s apart in one walk box
+    assert min_reps_v2(walk, [(0.0, 30.0)]).tolist() == []
+    assert min_reps_v2([7.0, 12.0], [(0.0, 30.0)]).tolist() == [7.0, 12.0]
+
+
+def test_min_reps_v2_drops_a_rep_alone_in_its_box_or_in_no_box():
+    assert min_reps_v2([5.0], [(0.0, 10.0)]).tolist() == []
+    assert min_reps_v2([2.0, 4.5, 7.0, 40.0], [(0.0, 10.0)]).tolist() == [2.0, 4.5, 7.0]
+    assert min_reps_v2([], [(0.0, 10.0)]).tolist() == [] and min_reps_v2([2.0, 4.5], []).tolist() == []
+
+
+def test_min_reps_v2_judges_each_box_on_its_own():
+    boxes = [(0.0, 10.0), (60.0, 90.0)]
+    assert min_reps_v2([2.0, 4.5, 7.0, 65.0, 85.0], boxes).tolist() == [2.0, 4.5, 7.0]
+    assert min_reps_v2([2.0, 4.5, 7.0, 65.0, 70.0], boxes).tolist() == [2.0, 4.5, 7.0, 65.0, 70.0]
 
 
 def test_lift_span_starts_where_the_lift_leaves_its_dip_not_at_the_dip():
