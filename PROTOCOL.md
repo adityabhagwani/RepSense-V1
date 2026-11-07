@@ -211,7 +211,8 @@ Sync should show a match of **0.8 or higher** at both gestures. Labels may repor
 1. Start from the typed counts.
 2. For each set on your paper notes (and the exhaustion sets), **look only at the raw wrist data** (ax humps). Not the counters or the teacher's lift count.
 3. Where the raw data clearly shows a different number of full reps, add a row to `data/count_fixes.csv`: session, set_idx, full_reps, source, note, date.
-   - Half-lowers (from 11-07): a lift is a full rep only if the forearm comes back to within **15°** of hanging before the next lift. Read it on the settle plot (degrees from the hang). A scripted half-lower that comes back within 15° is a full rep: add a fix row.
+   - Half-lowers (from 11-07): a lift is a full rep only if the forearm comes back to within **15°** of hanging before the next lift. A scripted half-lower that comes back within 15° is a full rep: add a fix row.
+   - Measure "hanging" from the **session's hang**: the median start pose of all the session's curl sets. Not from each set's first 0.3 s (one bad set start shifts every angle in that set: p6_s1 set 12 started 29° off and read 17-31° at every bottom), and not from the rep bottoms (a set that never comes back down would read 0).
 4. Commit the fixes. **Then** run the comparison:
    ```bash
    .venv/bin/python -m src.detector p6_s1 p7_s1 --evaluate --detector v4
