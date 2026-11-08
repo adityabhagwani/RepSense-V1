@@ -162,51 +162,109 @@ def count_closed(df: pd.DataFrame, angle: np.ndarray, now: float, usb_axis, mode
     return boxes, counted_until
 
 
-class Screen:
-    """The state on top ("Resting", "Set in progress", "Set N ended"), then two panels: the last WINDOW_S of
-    forearm angle with sets shaded, and the list of finished sets."""
-    COLORS = {"resting": "#6e7781", "in progress": "#bc4c00", "ended": "#0969da"}
+# The screen's colors: the dataviz reference palette, dark mode (blue and orange pass its checks as a pair
+# on SURFACE). Status chips pair a symbol with the words, so the label never rests on color alone.
+PAGE, SURFACE, RAISED = "#0d0d0d", "#1a1a19", "#232322"
+INK, INK2, MUTED, GRID, BADGE_GRAY = "#f0efec", "#c3c2b7", "#898781", "#2c2c2a", "#383835"
+BLUE, ORANGE, GOOD, WARNING = "#3987e5", "#d95926", "#0ca30c", "#fab219"
 
-    def __init__(self, title: str):
+
+class Screen:
+    """Dark, three cards: the state on top (a badge: "Resting", "Set in progress" with a bar filling
+    over the BOX_GAP_S to the set's end, or "Set N ended" with its numbers), the last WINDOW_S of
+    forearm angle with sets shaded, and the finished sets, newest first."""
+
+    def __init__(self, subtitle: str):
         import matplotlib.pyplot as plt
+        from matplotlib.patches import FancyBboxPatch
 
         self.plt = plt
         plt.ion()
-        self.fig, (self.ax, self.board) = plt.subplots(1, 2, figsize=(13, 5.4), gridspec_kw={"width_ratios": [2.4, 1]})
-        self.fig.subplots_adjust(top=0.74, bottom=0.12, left=0.07, right=0.98)
-        self.fig.suptitle(title, x=0.01, y=0.98, ha="left", fontsize=11, color="#6e7781")
-        self.state = self.fig.text(0.01, 0.85, "", fontsize=22, fontweight="bold", va="center")
+        plt.rcParams["font.family"] = ["Helvetica Neue", "DejaVu Sans"]  # DejaVu Sans has the check mark
+        self.fig = fig = plt.figure(figsize=(13, 6.2), facecolor=PAGE)
+        fig.text(0.025, 0.935, "RepSense", fontsize=17, fontweight="bold", color=INK)
+        fig.text(0.128, 0.937, subtitle, fontsize=11, color=MUTED)
+        for x, y, w, h in [(0.02, 0.70, 0.96, 0.19), (0.02, 0.05, 0.665, 0.62), (0.70, 0.05, 0.28, 0.62)]:
+            fig.patches.append(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.012",
+                                              transform=fig.transFigure, facecolor=SURFACE, edgecolor="none", zorder=-1))
+        self.state_ax = fig.add_axes([0.035, 0.715, 0.93, 0.16])
+        self.ax = fig.add_axes([0.07, 0.13, 0.595, 0.49])
+        self.list_ax = fig.add_axes([0.715, 0.07, 0.255, 0.58])
+
+    @staticmethod
+    def chip(ax, x: float, y: float, label: str, size: float):
+        ok = label == "likely right"
+        ax.text(x, y, ("✓  " if ok else "!  ") + label, fontsize=size, fontweight="bold", va="center",
+                color="#ffffff" if ok else "#0b0b0b",
+                bbox=dict(boxstyle="round,pad=0.35,rounding_size=0.5", facecolor=GOOD if ok else WARNING, edgecolor="none"))
+
+    def draw_state(self, kind: str, boxes: list[Box], sets: list[LiveSet], now: float):
+        a = self.state_ax
+        a.clear()
+        a.axis("off")
+        a.set_xlim(0, 1)
+        a.set_ylim(0, 1)
+        text, fill, ink = {"resting": ("Resting", BADGE_GRAY, INK2), "in progress": ("Set in progress", ORANGE, "#ffffff"),
+                           "ended": (f"Set {sets[-1].n} ended" if sets else "", BLUE, "#ffffff")}[kind]
+        a.text(0.0, 0.62, text, fontsize=24, fontweight="bold", color=ink, va="center",
+               bbox=dict(boxstyle="round,pad=0.45,rounding_size=0.6", facecolor=fill, edgecolor="none"))
+        if kind == "in progress":
+            since = now - [b for b in boxes if now - b.lifts[-1].top <= BOX_GAP_S][-1].lifts[-1].top
+            a.text(0.33, 0.70, f"last lift {since:.0f} s ago", fontsize=15, color=INK, va="center")
+            a.text(0.33, 0.40, f"the set ends after {BOX_GAP_S:.0f} s with no lift", fontsize=11, color=MUTED, va="center")
+            a.barh(0.12, 1.0, height=0.10, color=GRID)
+            a.barh(0.12, min(since / BOX_GAP_S, 1.0), height=0.10, color=ORANGE)
+        elif kind == "ended":
+            s = sets[-1]
+            a.text(0.30, 0.62, f"{s.reps}", fontsize=34, fontweight="bold", color=INK, va="center")
+            a.text(0.36, 0.62, f"reps   ·   {s.seconds:.0f} s", fontsize=16, color=INK2, va="center")
+            self.chip(a, 0.60, 0.62, s.label, 13)
+        else:
+            a.text(0.20, 0.62, "waiting for the next set", fontsize=14, color=MUTED, va="center")
 
     def draw(self, df: pd.DataFrame, now: float, boxes: list[Box], sets: list[LiveSet], angle: np.ndarray | None):
-        ax, board = self.ax, self.board
-        kind, text = state(boxes, sets, now)
-        self.state.set_text(text)
-        self.state.set_color(self.COLORS[kind])
-        ax.clear(), board.clear()
+        self.draw_state(state(boxes, sets, now)[0], boxes, sets, now)
+        ax = self.ax
+        ax.clear()
+        ax.set_facecolor(SURFACE)
+        for y in (0, 90, 180):
+            ax.axhline(y, color=GRID, lw=1, zorder=0)
+        for s in sets:
+            if s.end >= now - WINDOW_S:
+                ax.axvspan(max(s.start - now, -WINDOW_S), s.end - now, color=RAISED, lw=0, zorder=0)
+                ax.text(max(s.start - now, -WINDOW_S) + 0.4, 176, f"Set {s.n} · {s.reps} reps", fontsize=10,
+                        color=INK2, va="top")
+        for b in boxes:
+            if now - b.lifts[-1].top <= BOX_GAP_S:
+                ax.axvspan(max(b.start - now, -WINDOW_S), 0, color=ORANGE, alpha=0.14, lw=0, zorder=0)
         if angle is not None and len(df):
             x = df["host_t"].to_numpy() - now
             keep = x >= -WINDOW_S
-            ax.plot(x[keep], angle[keep], color="#2a78d6", lw=1.4)
-        for s in sets:
-            if s.end >= now - WINDOW_S:
-                ax.axvspan(s.start - now, s.end - now, color="#2a78d6", alpha=0.12, lw=0)
-                ax.text(max(s.start - now, -WINDOW_S), 172, f"Set {s.n}: {s.reps}", fontsize=10, color="#1f2328")
-        open_box = [b for b in boxes if now - b.lifts[-1].top <= BOX_GAP_S]
-        for b in open_box:
-            ax.axvspan(b.start - now, 0, color="#eb6834", alpha=0.12, lw=0)
+            ax.fill_between(x[keep], -10, angle[keep], color=BLUE, alpha=0.10, lw=0, zorder=1)
+            ax.plot(x[keep], angle[keep], color=BLUE, lw=2, solid_capstyle="round", solid_joinstyle="round", zorder=2)
+            ax.plot([x[keep][-1]], [angle[keep][-1]], "o", ms=9, color=BLUE, mec=SURFACE, mew=2, zorder=3)
         ax.set_xlim(-WINDOW_S, 0)
         ax.set_ylim(-10, 185)
-        ax.set_xlabel("seconds ago", color="#6e7781")
-        ax.set_ylabel("forearm angle (deg, wrist only)", color="#6e7781")
-        for sp in ("top", "right"):
-            ax.spines[sp].set_visible(False)
-        board.axis("off")
-        board.text(0, 1, "Sets", fontsize=13, fontweight="bold", va="top", color="#1f2328", transform=board.transAxes)
-        for k, s in enumerate(sets[-8:]):
-            color = "#9a3a10" if s.label == "check this set" else "#1a7f37"
-            board.text(0, 0.86 - 0.11 * k, f"Set {s.n}   {s.reps} reps   {s.seconds:.0f} s", fontsize=13, va="top",
-                       color="#1f2328", transform=board.transAxes)
-            board.text(0.66, 0.86 - 0.11 * k, s.label, fontsize=11, va="top", color=color, transform=board.transAxes)
+        ax.set_yticks([0, 90, 180], ["0°", "90°", "180°"])
+        ax.set_xticks(range(-30, 1, 5), [f"{t} s" if t else "now" for t in range(-30, 1, 5)])
+        ax.tick_params(colors=MUTED, labelsize=10, length=0)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_title("Forearm angle, from the wrist", loc="left", fontsize=12, color=INK2, pad=10)
+        la = self.list_ax
+        la.clear()
+        la.axis("off")
+        la.set_xlim(0, 1)
+        la.set_ylim(0, 1)
+        la.text(0, 0.97, "Sets", fontsize=13, fontweight="bold", color=INK, va="top")
+        if not sets:
+            la.text(0, 0.84, "No sets yet", fontsize=11, color=MUTED, va="top")
+        for k, s in enumerate(reversed(sets[-6:])):
+            y = 0.84 - 0.145 * k
+            la.text(0, y, f"{s.reps}", fontsize=22, fontweight="bold", color=INK, va="center")
+            la.text(0.17, y + 0.025, f"Set {s.n}", fontsize=11, color=INK2, va="center")
+            la.text(0.17, y - 0.03, f"{s.seconds:.0f} s", fontsize=10, color=MUTED, va="center")
+            self.chip(la, 0.48, y, s.label, 10)
         self.fig.canvas.draw_idle()
         self.plt.pause(0.001)
 
@@ -215,8 +273,7 @@ def run(source, step: float, speed: float, show: bool) -> list[LiveSet]:
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
     model = joblib.load(VERSIONS["v4"]["path"])
     error_model = joblib.load(ERROR_MODEL)
-    screen = Screen(f"RepSense · {'replay of ' + source.session if isinstance(source, Recording) else 'live'} · wrist only"
-                    " · a set's final numbers appear 12 s after its last rep") if show else None
+    screen = Screen(f"{'replay of ' + source.session if isinstance(source, Recording) else 'live'} · wrist only") if show else None
     sets, counted_until, shown = [], -np.inf, None
     try:
         while not source.done:
