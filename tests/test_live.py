@@ -1,5 +1,5 @@
 from src.boxes import BOX_GAP_S, Box, Lift
-from src.live import RISK_FLAG, LiveSet, ready
+from src.live import RISK_FLAG, LiveSet, ready, state
 
 
 def box(*tops):
@@ -25,3 +25,13 @@ def test_only_the_closed_boxes_after_the_last_counted_one_are_ready():
 def test_the_label_flags_the_risky_sets():
     assert LiveSet(1, 0.0, 10.0, 9, RISK_FLAG).label == "check this set"
     assert LiveSet(1, 0.0, 10.0, 9, RISK_FLAG - 0.01).label == "likely right"
+
+
+def test_the_screen_says_in_progress_while_a_box_is_open():
+    assert state([box(10.0, 12.0)], [], now=20.0) == ("in progress", "Set in progress · last lift 8 s ago")
+
+
+def test_the_screen_shows_the_final_numbers_just_after_a_set_ends_then_resting():
+    done = LiveSet(1, 7.0, 16.0, 2, 0.05, seconds=6.4, counted_at=24.1)
+    assert state([box(10.0, 12.0)], [done], now=26.0) == ("ended", "Set 1 ended · 2 reps · 6 s · likely right")
+    assert state([box(10.0, 12.0)], [done], now=40.0) == ("resting", "Resting")

@@ -1,11 +1,13 @@
-"""Live demo: each set's count from the wrist, about 12 s after its last rep, with a risk label.
+"""Live demo: the screen says "Resting" or "Set in progress" as you train, and gives each set's final
+numbers (reps, time, a risk label) about 12 s after its last rep. Wrist only.
 
 The counters judge a hump against the set's typical hump, so a count is only known once the set is
 over. A set is over when no lift can join its box any more: BOX_GAP_S after its last lift's top
 (stream-v1's rule, src/boxes.py). Every STEP_S this reads the recording so far, finds the lifts and
 boxes exactly as the replay does, and counts each box once it closes with the replay's own counter
 (stream.count_box: counter-v2, detector-v4, min-reps-v1), so a live count is the replay's count of
-the same box. The label is count-error-v1 on that box: "check this set" when its risk is among the
+the same box. A set shows as in progress from its second lift (one lift alone could be anything,
+the box rule) until it closes. The label is count-error-v1 on that box: "check this set" when its risk is among the
 riskiest 20% of the 3,000 spliced sets the model learned from, else "likely right". Experimental:
 on p6/p7 (pre-registered) the model was inconclusive.
 
@@ -39,6 +41,7 @@ from src.sync import REPORTS_DIR
 STEP_S = 0.5        # how often the recording is re-read and closed boxes counted
 WINDOW_S = 30.0     # seconds of wrist angle on screen
 MIN_DATA_S = 3.0    # nothing to look at before this much recording
+ENDED_S = 6.0       # how long "Set N ended" stays up as the state before "Resting"
 ERROR_MODEL = MODELS_DIR / "count_error_v1.joblib"
 RISK_FLAG = 0.1346  # count-error-v1's 80th-percentile risk on the 3,000 spliced sets it was trained on
                     # (reports/error_rows_spliced_1_v4.csv): 55% of the sets above it were miscounted, 2.4% below
@@ -51,6 +54,8 @@ class LiveSet:
     end: float
     reps: int
     risk: float
+    seconds: float = 0.0     # first lift's start to last lift's end
+    counted_at: float = 0.0  # host clock when the set closed
 
     @property
     def label(self) -> str:
@@ -61,6 +66,17 @@ def ready(boxes: list[Box], now: float, counted_until: float) -> list[Box]:
     """Boxes no lift can join any more (BOX_GAP_S since their last top) and not yet counted: those
     starting after `counted_until`, the last top of the last box counted. Boxes come in time order."""
     return [b for b in boxes if now - b.lifts[-1].top > BOX_GAP_S and b.lifts[0].top > counted_until]
+
+
+def state(boxes: list[Box], sets: list[LiveSet], now: float) -> tuple[str, str]:
+    """(kind, text) for the screen: a set in progress (an open box), a set that just ended, or resting."""
+    open_boxes = [b for b in boxes if now - b.lifts[-1].top <= BOX_GAP_S]
+    if open_boxes:
+        return "in progress", f"Set in progress · last lift {now - open_boxes[-1].lifts[-1].top:.0f} s ago"
+    if sets and now - sets[-1].counted_at <= ENDED_S:
+        s = sets[-1]
+        return "ended", f"Set {s.n} ended · {s.reps} reps · {s.seconds:.0f} s · {s.label}"
+    return "resting", "Resting"
 
 
 class Board:
@@ -128,26 +144,34 @@ def count_closed(df: pd.DataFrame, angle: np.ndarray, now: float, usb_axis, mode
         seg = slice_set(df, {"start_host_t": b.start, "end_host_t": b.end})
         reps = count_box(seg, model, usb_axis, "v4")["min_reps"]
         signs = pd.DataFrame([symptoms(seg, model, usb_axis, "v4")])[error_model["signs"]]
-        sets.append(LiveSet(len(sets) + 1, b.start, b.end, reps, float(error_model["model"].predict_proba(signs)[0, 1])))
+        sets.append(LiveSet(len(sets) + 1, b.start, b.end, reps, float(error_model["model"].predict_proba(signs)[0, 1]),
+                            b.lifts[-1].end - b.lifts[0].start, now))
         counted_until = b.lifts[-1].top
         s = sets[-1]
-        print(f"Set {s.n}: {s.reps} reps · {s.label} (risk {s.risk:.2f}) · counted {now - b.lifts[-1].top:.0f} s after the last rep")
+        print(f"Set {s.n} ended: {s.reps} reps · {s.seconds:.0f} s · {s.label} (risk {s.risk:.2f})")
     return boxes, counted_until
 
 
 class Screen:
-    """Two panels: the last WINDOW_S of wrist angle with sets shaded, and the list of counted sets."""
+    """The state on top ("Resting", "Set in progress", "Set N ended"), then two panels: the last WINDOW_S of
+    forearm angle with sets shaded, and the list of finished sets."""
+    COLORS = {"resting": "#6e7781", "in progress": "#bc4c00", "ended": "#0969da"}
 
     def __init__(self, title: str):
         import matplotlib.pyplot as plt
 
         self.plt = plt
         plt.ion()
-        self.fig, (self.ax, self.board) = plt.subplots(1, 2, figsize=(13, 4.6), gridspec_kw={"width_ratios": [2.4, 1]})
-        self.fig.suptitle(title, x=0.01, ha="left", fontsize=12, color="#1f2328")
+        self.fig, (self.ax, self.board) = plt.subplots(1, 2, figsize=(13, 5.4), gridspec_kw={"width_ratios": [2.4, 1]})
+        self.fig.subplots_adjust(top=0.74, bottom=0.12, left=0.07, right=0.98)
+        self.fig.suptitle(title, x=0.01, y=0.98, ha="left", fontsize=11, color="#6e7781")
+        self.state = self.fig.text(0.01, 0.85, "", fontsize=22, fontweight="bold", va="center")
 
     def draw(self, df: pd.DataFrame, now: float, boxes: list[Box], sets: list[LiveSet], angle: np.ndarray | None):
         ax, board = self.ax, self.board
+        kind, text = state(boxes, sets, now)
+        self.state.set_text(text)
+        self.state.set_color(self.COLORS[kind])
         ax.clear(), board.clear()
         if angle is not None and len(df):
             x = df["host_t"].to_numpy() - now
@@ -159,9 +183,7 @@ class Screen:
                 ax.text(max(s.start - now, -WINDOW_S), 172, f"Set {s.n}: {s.reps}", fontsize=10, color="#1f2328")
         open_box = [b for b in boxes if now - b.lifts[-1].top <= BOX_GAP_S]
         for b in open_box:
-            ax.axvspan(b.start - now, 0, color="#eb6834", alpha=0.10, lw=0)
-            ax.text(b.start - now, 172, f"set in progress · count {BOX_GAP_S - (now - b.lifts[-1].top):.0f} s after the last rep",
-                    fontsize=9, color="#9a3a10")
+            ax.axvspan(b.start - now, 0, color="#eb6834", alpha=0.12, lw=0)
         ax.set_xlim(-WINDOW_S, 0)
         ax.set_ylim(-10, 185)
         ax.set_xlabel("seconds ago", color="#6e7781")
@@ -172,9 +194,9 @@ class Screen:
         board.text(0, 1, "Sets", fontsize=13, fontweight="bold", va="top", color="#1f2328", transform=board.transAxes)
         for k, s in enumerate(sets[-8:]):
             color = "#9a3a10" if s.label == "check this set" else "#1a7f37"
-            board.text(0, 0.86 - 0.11 * k, f"Set {s.n}   {s.reps} reps", fontsize=13, va="top", color="#1f2328",
-                       transform=board.transAxes)
-            board.text(0.62, 0.86 - 0.11 * k, s.label, fontsize=11, va="top", color=color, transform=board.transAxes)
+            board.text(0, 0.86 - 0.11 * k, f"Set {s.n}   {s.reps} reps   {s.seconds:.0f} s", fontsize=13, va="top",
+                       color="#1f2328", transform=board.transAxes)
+            board.text(0.66, 0.86 - 0.11 * k, s.label, fontsize=11, va="top", color=color, transform=board.transAxes)
         self.fig.canvas.draw_idle()
         self.plt.pause(0.001)
 
@@ -183,9 +205,9 @@ def run(source, step: float, speed: float, show: bool) -> list[LiveSet]:
     usb_axis = json.loads(USB_AXIS_FILE.read_text())["axis"]
     model = joblib.load(VERSIONS["v4"]["path"])
     error_model = joblib.load(ERROR_MODEL)
-    screen = Screen(f"RepSense · {'replay of ' + source.session if isinstance(source, Recording) else 'live'}"
-                    " · counts appear 12 s after a set's last rep") if show else None
-    sets, counted_until = [], -np.inf
+    screen = Screen(f"RepSense · {'replay of ' + source.session if isinstance(source, Recording) else 'live'} · wrist only"
+                    " · a set's final numbers appear 12 s after its last rep") if show else None
+    sets, counted_until, shown = [], -np.inf, None
     try:
         while not source.done:
             tick = time.time()
@@ -194,6 +216,10 @@ def run(source, step: float, speed: float, show: bool) -> list[LiveSet]:
             if len(df) > 1 and df["host_t"].iloc[-1] - df["host_t"].iloc[0] >= MIN_DATA_S:
                 angle = stream_angle(df, usb_axis)
                 boxes, counted_until = count_closed(df, angle, now, usb_axis, model, error_model, sets, counted_until)
+            kind = state(boxes, sets, now)[0]
+            if kind == "in progress" and shown != kind:
+                print("Set in progress")
+            shown = kind
             if screen:
                 screen.draw(df, now, boxes, sets, angle)
             if isinstance(source, Recording):
@@ -222,7 +248,7 @@ def main():
         source = Recording(args.replay, args.speed)
     else:
         source = Board(args.session or datetime.now().strftime("live_%Y%m%d_%H%M%S"), args.port)
-        print(f"Streaming to {raw_path(source.session)}. Curl; each count appears 12 s after the set's last rep. Ctrl-C stops.")
+        print(f"Streaming to {raw_path(source.session)}. A set's final numbers appear 12 s after its last rep. Ctrl-C stops.")
     sets = run(source, args.step, args.speed, not args.no_window)
     if sets:
         out = REPORTS_DIR / f"{source.session}_live_sets.csv"
