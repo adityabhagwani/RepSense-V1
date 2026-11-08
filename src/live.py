@@ -11,11 +11,12 @@ the box rule) until it closes. The label is count-error-v1 on that box: "check t
 riskiest 20% of the 3,000 spliced sets the model learned from, else "likely right". Experimental:
 on p6/p7 (pre-registered) the model was inconclusive.
 
-The data comes from a source with one method, read() -> (samples so far, now): the Nano over USB
-(record.Streamer, which also saves the session to data/raw/), or a saved session replayed at any
-speed (no board needed; the demo's backup and its test).
+The data comes from a source with one method, read() -> (samples so far, now): the Nano over USB or
+BLE (record.Streamer or ble.BleStreamer, which also save the session to data/raw/), or a saved
+session replayed at any speed (no board needed; the demo's backup and its test).
 
-    python -m src.live                          # live, from the Nano
+    python -m src.live                          # live, from the Nano over USB
+    python -m src.live --ble                    # live, over Bluetooth (firmware v2; board on a power bank)
     python -m src.live --replay p6_s1 --speed 4 # a saved session through the same loop
 """
 
@@ -80,26 +81,34 @@ def state(boxes: list[Box], sets: list[LiveSet], now: float) -> tuple[str, str]:
 
 
 class Board:
-    """The Nano over USB. record.Streamer writes every sample to data/raw/<session>.csv as it comes."""
+    """The Nano over USB (record.Streamer) or BLE (ble.BleStreamer): either writes every sample to
+    data/raw/<session>.csv as it comes."""
 
-    def __init__(self, session: str, port: str | None):
-        import serial
-        from src.record import Streamer, find_port
-
+    def __init__(self, session: str, port: str | None, ble: bool = False):
         self.session, path = session, raw_path(session)
         if path.exists():
             raise SystemExit(f"Session '{session}' already exists; pick a new --session.")
         path.parent.mkdir(parents=True, exist_ok=True)
         self.raw_file = open(path, "w", newline="")
         csv.writer(self.raw_file).writerow(RAW_COLUMNS)
-        self.ser = serial.Serial(port or find_port(), 115200, timeout=0.5)
-        self.ser.reset_input_buffer()
-        self.streamer = Streamer(self.ser, self.raw_file, log=lambda msg: None)
+        self.ser = None
+        if ble:
+            from src.ble import SCAN_S, BleStreamer
+
+            self.streamer, wait_s = BleStreamer(self.raw_file), SCAN_S + 10
+        else:
+            import serial
+            from src.record import Streamer, find_port
+
+            self.ser = serial.Serial(port or find_port(), 115200, timeout=0.5)
+            self.ser.reset_input_buffer()
+            self.streamer, wait_s = Streamer(self.ser, self.raw_file, log=lambda msg: None), 5
         self.streamer.start()
-        if not self.streamer.got_data.wait(timeout=5):
+        if not self.streamer.got_data.wait(timeout=wait_s):
             self.close()
             path.unlink()
-            raise SystemExit("No data from the board in 5 s. Is sensor_logger flashed? Is the Serial Monitor open?")
+            raise SystemExit(f"No data from the board in {wait_s:.0f} s. Is sensor_logger flashed"
+                             f"{' (v2) and powered' if ble else '? Is the Serial Monitor open'}?")
         self.done = False
 
     def read(self) -> tuple[pd.DataFrame, float]:
@@ -109,7 +118,8 @@ class Board:
 
     def close(self):
         self.streamer.stop()
-        self.ser.close()
+        if self.ser:
+            self.ser.close()
         self.raw_file.close()
 
 
@@ -242,12 +252,13 @@ def main():
     parser.add_argument("--step", type=float, default=STEP_S, help="seconds between reads")
     parser.add_argument("--session", help="name for the live recording (default live_<date>_<time>)")
     parser.add_argument("--port", help="serial port (default: first Arduino found)")
+    parser.add_argument("--ble", action="store_true", help="read the Nano over Bluetooth (firmware v2), not USB")
     parser.add_argument("--no-window", action="store_true", help="print the sets only")
     args = parser.parse_args()
     if args.replay:
         source = Recording(args.replay, args.speed)
     else:
-        source = Board(args.session or datetime.now().strftime("live_%Y%m%d_%H%M%S"), args.port)
+        source = Board(args.session or datetime.now().strftime("live_%Y%m%d_%H%M%S"), args.port, args.ble)
         print(f"Streaming to {raw_path(source.session)}. A set's final numbers appear 12 s after its last rep. Ctrl-C stops.")
     sets = run(source, args.step, args.speed, not args.no_window)
     if sets:
