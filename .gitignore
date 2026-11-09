@@ -11,3 +11,6 @@ data/aligned/
 data/labels/
 data/check_marks/
 reports/
+
+# Demo footage (large; kept out of git, the video is shared by link)
+Demo Materials/
