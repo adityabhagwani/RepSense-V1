@@ -1,8 +1,10 @@
 # RepSense
 
-A rep counter for dumbbell curls that uses one sensor on the wrist. It also tells you when to check its count.
+https://github.com/user-attachments/assets/3a3fee94-3b8f-4ad5-b892-cd083c3ca686
 
-**Demo (2 min 27 s, live over Bluetooth):** VIDEO_LINK
+*Live demo over Bluetooth (2 min 27 s): two sets of curls with half reps and pauses, counted from the wrist.*
+
+A rep counter for dumbbell curls that uses one sensor on the wrist. It also tells you when to check its count.
 
 **Result on two people that the counter never saw, with the counter locked before their data was scored:**
 - 19 of 20 curl sets within 1 rep; 16 of 20 exact.
